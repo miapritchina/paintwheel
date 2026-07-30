@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Paintwheel — Wet Watercolor</title>
+<style>
+  :root {
+    --panel-bg: rgba(30, 28, 26, 0.82);
+    --panel-fg: #f0ece6;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #1a1816;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+  }
+  #canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  #toolbar {
+    position: absolute;
+    left: 50%;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--panel-bg);
+    color: var(--panel-fg);
+    border-radius: 16px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    max-width: min(96vw, 640px);
+  }
+  #palette {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .swatch {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    cursor: pointer;
+    box-shadow: inset 0 0 4px rgba(0,0,0,0.35);
+  }
+  .swatch.active {
+    border-color: #fff;
+    transform: scale(1.12);
+  }
+  .swatch.water {
+    background: linear-gradient(135deg, #dfeef5 0%, #b9d8e8 100%) !important;
+  }
+  #controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    font-size: 12px;
+  }
+  .ctl { display: flex; align-items: center; gap: 5px; }
+  input[type=range] { width: 78px; }
+  button {
+    background: rgba(255,255,255,0.12);
+    color: var(--panel-fg);
+    border: none;
+    border-radius: 8px;
+    padding: 6px 11px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  button:active { background: rgba(255,255,255,0.28); }
+  #pigname {
+    font-size: 11px;
+    opacity: 0.75;
+    min-height: 13px;
+  }
+  #err {
+    position: absolute; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    color: #f0ece6; background: #201d1b;
+    padding: 24px; text-align: center;
+    font-size: 15px; line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="err"></div>
+<div id="toolbar">
+  <div id="palette"></div>
+  <div id="pigname"></div>
+  <div id="controls">
+    <div class="ctl"><span>Size</span><input id="size" type="range" min="2" max="60" value="16"></div>
+    <div class="ctl"><span>Water</span><input id="water" type="range" min="0" max="100" value="65"></div>
+    <div class="ctl"><span>Paint</span><input id="load" type="range" min="0" max="100" value="60"></div>
+    <button id="dry">Dry fast</button>
+    <button id="clear">Clear</button>
+    <button id="demo">Demo</button>
+  </div>
+</div>
+<script src="js/pigments.js"></script>
+<script src="js/shaders.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/demo.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
