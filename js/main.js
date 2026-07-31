@@ -255,6 +255,11 @@
     for (let i = 0; i < NPIG; i++) brush.pig[i] *= 0.985;
   }
 
+  // Water pickup is only allowed when the puddle existed BEFORE this stroke:
+  // otherwise the brush would re-absorb the water it just deposited and get
+  // wetter by merely touching a dry tray.
+  let strokeHadPuddle = false;
+
   function trayPickup(x, y) {
     const now = performance.now();
     if (now - lastPickup < 60) return;
@@ -268,7 +273,9 @@
         brush.pig[i] = brush.pig[i] * 0.75 + Math.min(m.pig[i] * 1.2, 1) * 0.35;
       }
     }
-    if (m.water > 0.005) brush.water = Math.min(1, Math.max(brush.water, m.water * 6));
+    if (strokeHadPuddle && m.water > 0.02) {
+      brush.water = Math.min(1, Math.max(brush.water, Math.min(m.water * 4, 0.9)));
+    }
     updateBrushView('Mixing…');
   }
 
@@ -295,6 +302,9 @@
     trayCanvas.setPointerCapture(e.pointerId);
     mixing = true;
     trayLast = null;
+    // sample the tray before touching it: was there already a puddle here?
+    const pre = tray.readMix(e.offsetX, e.offsetY);
+    strokeHadPuddle = pre.water > 0.015;
     trayDab(e.offsetX, e.offsetY);
     trayPickup(e.offsetX, e.offsetY);
   });
