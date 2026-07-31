@@ -54,11 +54,21 @@
     return t;
   }
 
+  const waterbar = document.querySelector('#waterbar > div');
+  const paintbar = document.querySelector('#paintbar > div');
+
   function updateBrushView(msg) {
     const total = brushTotal();
-    const color = total > 0.01 ? PIGMENTS.kmColor(brush.pig, 2 + 8 * Math.min(total, 1)) : 'rgb(238,236,230)';
+    // thickness scales with load so a heavy brush looks like creamy masstone
+    // and a nearly-spent one shows a pale tint
+    const color = total > 0.01 ? PIGMENTS.kmColor(brush.pig, 1.5 + 12 * Math.min(total, 1.2)) : 'rgb(238,236,230)';
     brushview.style.background = color;
     brushview.style.borderColor = `rgba(160,200,255,${0.25 + 0.6 * brush.water})`;
+    // wet brush looks glossy, dry brush matte
+    brushview.style.boxShadow = `inset 0 -5px 8px rgba(0,0,0,0.25), inset 0 ${2 + 4 * brush.water}px ${3 + 6 * brush.water}px rgba(255,255,255,${0.15 + 0.35 * brush.water})`;
+    waterbar.style.width = `${Math.round(brush.water * 100)}%`;
+    paintbar.style.width = `${Math.round(Math.min(total / 1.2, 1) * 100)}%`;
+    paintbar.style.background = color;
     brushcursor.style.background = total > 0.01 ? color.replace('rgb', 'rgba').replace(')', ',0.35)') : 'rgba(200,220,255,0.2)';
     if (msg !== undefined) pignameEl.textContent = msg;
   }
@@ -74,10 +84,10 @@
     b.style.background = PIGMENTS.kmColor(panParts, 4.5);
     b.title = `${p.name} (${p.ci})`;
     b.addEventListener('pointerdown', () => {
-      // a wetter brush picks up more paint from the pan
-      const pickup = 0.15 + 0.85 * brush.water;
-      brush.pig[i] = Math.min(1, brush.pig[i] + 0.45 * pickup);
-      brush.water = Math.max(brush.water - 0.03, 0);
+      // a wetter brush picks up more paint; tap repeatedly for a creamy load
+      const pickup = 0.2 + 0.8 * brush.water;
+      brush.pig[i] = Math.min(1.2, brush.pig[i] + 0.8 * pickup);
+      brush.water = Math.max(brush.water - 0.04, 0);
       updateBrushView(`${p.name} (${p.ci})`);
     });
     paletteEl.appendChild(b);
@@ -163,8 +173,8 @@
     DEMO.stop();
     const size = Number(sizeEl.value) * (0.35 + 0.65 * pressure);
     const total = brushTotal();
-    const water = (0.002 + 0.055 * brush.water) * (0.5 + 0.5 * pressure);
-    const amount = 0.13 * (0.4 + 0.6 * pressure);
+    const water = (0.002 + 0.042 * brush.water) * (0.5 + 0.5 * pressure);
+    const amount = 0.4 * (0.4 + 0.6 * pressure);
     for (let i = 0; i < NPIG; i++) pigDep[i] = brush.pig[i] * amount;
     // clean damp brush lifts pigment instead of depositing
     const scrub = total < 0.02 ? 0.08 * pressure * brush.water : 0;
@@ -228,7 +238,7 @@
   function trayDab(x, y) {
     const total = brushTotal();
     const water = 0.004 + 0.05 * brush.water;
-    for (let i = 0; i < NPIG; i++) trayPig[i] = brush.pig[i] * 0.10;
+    for (let i = 0; i < NPIG; i++) trayPig[i] = brush.pig[i] * 0.3;
     tray.splat(x, y, 11, water, trayPig, Math.max(brush.water, 0.3));
     // slight shedding into the tray
     for (let i = 0; i < NPIG; i++) brush.pig[i] *= 0.985;
@@ -251,8 +261,25 @@
     updateBrushView('Mixing…');
   }
 
+  // double-tap detection by hand: dblclick doesn't fire reliably for
+  // touch + pointer-capture, so track tap timing/position ourselves
+  let lastTap = { t: 0, x: 0, y: 0 };
+  function rinseTray(msg = 'Tray rinsed') {
+    tray.clearAll();
+    updateBrushView(msg);
+  }
+  document.getElementById('rinse').addEventListener('click', () => rinseTray());
+
   trayCanvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
+    const now = performance.now();
+    if (now - lastTap.t < 350 && Math.hypot(e.offsetX - lastTap.x, e.offsetY - lastTap.y) < 25) {
+      lastTap.t = 0;
+      mixing = false;
+      rinseTray();
+      return;
+    }
+    lastTap = { t: now, x: e.offsetX, y: e.offsetY };
     trayCanvas.setPointerCapture(e.pointerId);
     mixing = true;
     trayLast = null;
@@ -276,10 +303,6 @@
   const trayEnd = () => { mixing = false; trayLast = null; updateBrushView(); };
   trayCanvas.addEventListener('pointerup', trayEnd);
   trayCanvas.addEventListener('pointercancel', trayEnd);
-  trayCanvas.addEventListener('dblclick', () => {
-    tray.clearAll();
-    updateBrushView('Tray rinsed');
-  });
 
   // --------------------------------------------------------------- loop ---
   window.addEventListener('resize', () => { sim.resize(); tray.resize(); });
