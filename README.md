@@ -53,6 +53,24 @@ Beyond the papers, the model borrows two effects:
   draws interior fluid (and pigment) outward: the coffee-ring effect that
   dries into dark edge lines.
 
+## The workbench
+
+The UI mirrors a physical setup: a **palette of pans** along the bottom, a
+**ceramic mixing tray**, a **water glass** and a **sponge**. The brush is
+stateful — it carries water and a 16-pigment load:
+
+- **Dip a pan** to pick up paint (a wet brush picks up more than a dry one).
+- **Mix on the tray**: the tray is a second instance of the full watercolor
+  simulation running on non-absorbent ceramic — smear paints together,
+  dilute the puddle, and the brush picks up whatever mixture is under it.
+  Leftover paint dries in the tray and re-wets later. Double-tap to rinse.
+- **💧 Water glass**: refills the brush with water and washes some pigment off.
+- **🧽 Sponge**: wipes the brush clean and damp.
+- Nothing refills mid-stroke: long strokes shed pigment first, then water,
+  and end in dry-brush texture.
+- **Paper picker**: Cold press / Hot press / Rough / Toned cream — different
+  tooth, absorbency and tint (switching gives a fresh sheet).
+
 ## Brush & workflow (inspired by Adobe Fresco / Art Set 4)
 
 - **Depleting reservoirs**: the brush carries finite water and pigment;

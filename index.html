@@ -8,7 +8,7 @@
 <title>Paintwheel — Wet Watercolor</title>
 <style>
   :root {
-    --panel-bg: rgba(30, 28, 26, 0.82);
+    --panel-bg: rgba(32, 30, 27, 0.88);
     --panel-fg: #f0ece6;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -24,68 +24,115 @@
     position: absolute; inset: 0;
     width: 100%; height: 100%;
     touch-action: none;
-    cursor: crosshair;
+    cursor: none;
+  }
+  /* brush cursor ring showing current load */
+  #brushcursor {
+    position: absolute;
+    pointer-events: none;
+    border: 1.5px solid rgba(40,40,40,0.55);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    display: none;
+    z-index: 5;
   }
   #toolbar {
     position: absolute;
-    left: 50%;
-    bottom: calc(10px + env(safe-area-inset-bottom));
-    transform: translateX(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    align-items: center;
-    padding: 10px 14px;
+    left: 0; right: 0;
+    bottom: 0;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
     background: var(--panel-bg);
     color: var(--panel-fg);
-    border-radius: 16px;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    max-width: min(96vw, 640px);
-  }
-  #palette {
     display: flex;
+    flex-direction: column;
     gap: 7px;
-    flex-wrap: wrap;
+    z-index: 10;
+  }
+  #workbench {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
     justify-content: center;
   }
-  .swatch {
-    width: 30px; height: 30px;
-    border-radius: 50%;
-    border: 2px solid transparent;
+  #tray {
+    width: 190px;
+    height: 84px;
+    border-radius: 10px;
+    box-shadow: inset 0 2px 8px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.08);
+    touch-action: none;
+    background: #f4f4f2;
+    flex: 0 0 auto;
+  }
+  #tools {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    justify-content: center;
+  }
+  .tool {
+    width: 44px; height: 38px;
+    font-size: 20px;
+    background: rgba(255,255,255,0.10);
+    border: none; border-radius: 9px;
     cursor: pointer;
-    box-shadow: inset 0 0 4px rgba(0,0,0,0.35);
   }
-  .swatch.active {
-    border-color: #fff;
-    transform: scale(1.12);
-  }
-  .swatch.water {
-    background: linear-gradient(135deg, #dfeef5 0%, #b9d8e8 100%) !important;
+  .tool:active { background: rgba(255,255,255,0.3); }
+  #brushview {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    margin: 0 auto;
+    border: 2px solid rgba(255,255,255,0.4);
+    background: #eee;
   }
   #controls {
     display: flex;
-    gap: 12px;
-    align-items: center;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 5px;
     justify-content: center;
-    font-size: 12px;
+    font-size: 11px;
+    min-width: 120px;
   }
   .ctl { display: flex; align-items: center; gap: 5px; }
-  input[type=range] { width: 78px; }
-  button {
+  input[type=range] { width: 70px; }
+  select {
     background: rgba(255,255,255,0.12);
     color: var(--panel-fg);
-    border: none;
-    border-radius: 8px;
-    padding: 6px 11px;
-    font-size: 12px;
+    border: none; border-radius: 6px;
+    padding: 3px 5px;
+    font-size: 11px;
+  }
+  .btnrow { display: flex; gap: 4px; flex-wrap: wrap; }
+  button.small {
+    background: rgba(255,255,255,0.12);
+    color: var(--panel-fg);
+    border: none; border-radius: 7px;
+    padding: 4px 8px;
+    font-size: 11px;
     cursor: pointer;
   }
-  button:active { background: rgba(255,255,255,0.28); }
+  button.small:active { background: rgba(255,255,255,0.28); }
+  #palette {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 5px;
+    max-width: 420px;
+    margin: 0 auto;
+    width: 100%;
+  }
+  .pan {
+    aspect-ratio: 1.35;
+    border-radius: 6px;
+    border: 1px solid rgba(0,0,0,0.4);
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.45), inset 0 -1px 2px rgba(255,255,255,0.15);
+    cursor: pointer;
+  }
+  .pan:active { transform: scale(0.93); }
   #pigname {
     font-size: 11px;
     opacity: 0.75;
+    text-align: center;
     min-height: 13px;
   }
   #err {
@@ -100,20 +147,30 @@
 </head>
 <body>
 <canvas id="canvas"></canvas>
+<div id="brushcursor"></div>
 <div id="err"></div>
 <div id="toolbar">
+  <div id="workbench">
+    <canvas id="tray" title="Mixing tray: dab paints here and smear them with the brush"></canvas>
+    <div id="tools">
+      <button id="glass" class="tool" title="Water glass: dip to load water / dilute">💧</button>
+      <button id="sponge" class="tool" title="Sponge: wipe the brush clean">🧽</button>
+      <div id="brushview" title="Current brush load"></div>
+    </div>
+    <div id="controls">
+      <div class="ctl"><span>Size</span><input id="size" type="range" min="2" max="60" value="16"></div>
+      <div class="ctl"><span>Paper</span><select id="paper"></select></div>
+      <div class="btnrow">
+        <button id="dry" class="small">Dry</button>
+        <button id="clear" class="small">Clear</button>
+        <button id="demo" class="small">Demo</button>
+        <button id="tilt" class="small">Tilt</button>
+        <button id="save" class="small">Save</button>
+      </div>
+    </div>
+  </div>
   <div id="palette"></div>
   <div id="pigname"></div>
-  <div id="controls">
-    <div class="ctl"><span>Size</span><input id="size" type="range" min="2" max="60" value="16"></div>
-    <div class="ctl"><span>Water</span><input id="water" type="range" min="0" max="100" value="65"></div>
-    <div class="ctl"><span>Paint</span><input id="load" type="range" min="0" max="100" value="60"></div>
-    <button id="dry">Dry fast</button>
-    <button id="clear">Clear</button>
-    <button id="demo">Demo</button>
-    <button id="tilt">Tilt</button>
-    <button id="save">Save</button>
-  </div>
 </div>
 <script src="js/pigments.js"></script>
 <script src="js/shaders.js"></script>

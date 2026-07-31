@@ -52,6 +52,11 @@ in vec2 vUV;
 SHADERS.paper = `#version 300 es
 ${COMMON}
 uniform float uSeed;
+uniform float uGrainAmp;  // mid-frequency bumps
+uniform float uToothAmp;  // fine tooth
+uniform float uFiberAmp;  // directional fibers
+uniform float uCapBase;   // absorbency
+uniform float uCapVar;
 out vec4 frag;
 
 float hash(vec2 p) {
@@ -80,8 +85,10 @@ void main() {
   float tooth = fbm(p * 0.35);
   float fiberH = vnoise(vec2(p.x * 0.9, p.y * 0.08));
   float fiberV = vnoise(vec2(p.x * 0.07, p.y * 0.85));
-  float height = clamp(0.55 * grain + 0.35 * tooth + 0.05 * fiberH + 0.05 * fiberV, 0.0, 1.0);
-  float capacity = 0.55 + 0.45 * fbm(p * 0.02 + 91.7);
+  float flat0 = 0.5 * (1.0 - uGrainAmp - uToothAmp - uFiberAmp); // keep mean ~0.5
+  float height = clamp(flat0 + uGrainAmp * grain + uToothAmp * tooth
+                       + uFiberAmp * 0.5 * (fiberH + fiberV), 0.0, 1.0);
+  float capacity = uCapBase + uCapVar * fbm(p * 0.02 + 91.7);
   float fibers = vnoise(p * 0.6 + 3.1);
   frag = vec4(height, capacity, fibers, 1.0);
 }`;
@@ -408,6 +415,7 @@ ${RP.map((i) => `uniform sampler2D uDep${i};`).join('\n')}
 uniform vec3 uK[${NP * 4}];
 uniform vec3 uS[${NP * 4}];
 uniform vec4 uGamma[${NP}];
+uniform vec3 uPaperColor;
 out vec4 frag;
 
 // Kubelka-Munk reflectance & transmittance of the pigment layer; K,S are
@@ -453,7 +461,7 @@ ${RP.map((i) => `  {
   vec3 n = normalize(vec3(-hx * 2.2, -hy * 2.2, 1.0));
   vec3 lightDir = normalize(vec3(0.45, 0.55, 0.8));
   float lam = 0.88 + 0.12 * max(dot(n, lightDir), 0.0);
-  vec3 Rpaper = vec3(0.94, 0.92, 0.87) * lam * (0.96 + 0.04 * pap.z);
+  vec3 Rpaper = uPaperColor * lam * (0.96 + 0.04 * pap.z);
 
   vec3 Rtot = Rpaper;
   if (total > 1e-5) {

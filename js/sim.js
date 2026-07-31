@@ -4,9 +4,20 @@
 
 'use strict';
 
+// Paper presets: procedural texture + absorbency + base color + flow feel.
+const PAPERS = {
+  coldpress: { label: 'Cold press', grain: 0.55, tooth: 0.35, fiber: 0.10, capBase: 0.55, capVar: 0.45, color: [0.94, 0.92, 0.87], paperSlope: 0.5 },
+  hotpress:  { label: 'Hot press',  grain: 0.22, tooth: 0.08, fiber: 0.05, capBase: 0.50, capVar: 0.22, color: [0.95, 0.94, 0.90], paperSlope: 0.2 },
+  rough:     { label: 'Rough',      grain: 0.72, tooth: 0.55, fiber: 0.12, capBase: 0.60, capVar: 0.50, color: [0.93, 0.91, 0.85], paperSlope: 0.7 },
+  toned:     { label: 'Toned cream',grain: 0.50, tooth: 0.30, fiber: 0.10, capBase: 0.55, capVar: 0.40, color: [0.90, 0.85, 0.72], paperSlope: 0.5 },
+  ceramic:   { label: 'Ceramic',    grain: 0.03, tooth: 0.0,  fiber: 0.02, capBase: 0.0,  capVar: 0.0,  color: [0.97, 0.97, 0.96], paperSlope: 0.05 },
+};
+
 class WatercolorSim {
-  constructor(canvas) {
+  constructor(canvas, opts = {}) {
     this.canvas = canvas;
+    this.paper = PAPERS[opts.paper || 'coldpress'];
+    this.maxSim = opts.maxSim || 1024;
     const gl = canvas.getContext('webgl2', {
       alpha: false,
       antialias: false,
@@ -51,6 +62,8 @@ class WatercolorSim {
       lift: 0.012,      // resolubility: rewet-lift rate per step
       drySpeed: 1.0,    // user "dry fast" multiplier
     };
+    this.params.paperSlope = this.paper.paperSlope;
+    Object.assign(this.params, opts.params || {});
 
     this._initGeometry();
     this._initPrograms();
@@ -137,8 +150,7 @@ class WatercolorSim {
     this.canvas.width = Math.round(cssW * dpr);
     this.canvas.height = Math.round(cssH * dpr);
 
-    const MAXSIM = 1024;
-    const scale = Math.min(1, MAXSIM / Math.max(cssW, cssH));
+    const scale = Math.min(1, this.maxSim / Math.max(cssW, cssH));
     const w = Math.max(64, Math.round(cssW * scale));
     const h = Math.max(64, Math.round(cssH * scale));
     if (this.simW === w && this.simH === h) return;
@@ -231,7 +243,21 @@ class WatercolorSim {
     this._bindOutputs([this.paperTex]);
     const p = this._use('paper', []);
     gl.uniform1f(p.uniforms.uSeed, seed);
+    gl.uniform1f(p.uniforms.uGrainAmp, this.paper.grain);
+    gl.uniform1f(p.uniforms.uToothAmp, this.paper.tooth);
+    gl.uniform1f(p.uniforms.uFiberAmp, this.paper.fiber);
+    gl.uniform1f(p.uniforms.uCapBase, this.paper.capBase);
+    gl.uniform1f(p.uniforms.uCapVar, this.paper.capVar);
     this._draw();
+  }
+
+  // Switch paper preset: regenerates the sheet (clears the painting).
+  setPaper(name) {
+    if (!PAPERS[name]) return;
+    this.paper = PAPERS[name];
+    this.params.paperSlope = this.paper.paperSlope;
+    this.clearAll();
+    this.regenPaper(Math.random() * 100);
   }
 
   // --------------------------------------------------------------- brush --
@@ -356,9 +382,42 @@ class WatercolorSim {
     PIGMENTS.forEach((pg, i) => { K.set(pg.K, i * 3); S.set(pg.S, i * 3); });
     gl.uniform3fv(p.uniforms.uK, K);
     gl.uniform3fv(p.uniforms.uS, S);
+    gl.uniform3fv(p.uniforms.uPaperColor, this.paper.color);
     this._ensurePigParams();
     gl.uniform4fv(p.uniforms.uGamma, this._pigParams.gamma);
     this._draw();
+  }
+
+  // Average pigment mixture + water under a brush footprint (css px), used
+  // by the mixing tray so the brush picks up what it touches. Reads one
+  // pixel per pigment texture at the sim cell under the center.
+  readMix(xCss, yCss) {
+    const gl = this.gl;
+    const cssW = this.canvas.clientWidth || this.canvas.width;
+    const cssH = this.canvas.clientHeight || this.canvas.height;
+    const px = Math.max(0, Math.min(this.simW - 1, Math.round((xCss / cssW) * this.simW)));
+    const py = Math.max(0, Math.min(this.simH - 1, Math.round((1 - yCss / cssH) * this.simH)));
+    const out = { pig: new Float32Array(PIG_TEXTURES * 4), water: 0 };
+    if (!this._readFbo) this._readFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._readFbo);
+    const buf = new Float32Array(4);
+    const readTex = (tex) => {
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      gl.readPixels(px, py, 1, 1, gl.RGBA, gl.FLOAT, buf);
+      return buf;
+    };
+    try {
+      for (let i = 0; i < PIG_TEXTURES; i++) {
+        const b = readTex(this.susp[i].read);
+        out.pig.set(b, i * 4);
+      }
+      const f = readTex(this.flow.read);
+      out.water = f[0];
+    } catch (e) {
+      // float readback unsupported: pickup silently degrades to no-op
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return out;
   }
 
   _ensurePigParams() {
