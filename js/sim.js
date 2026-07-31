@@ -60,6 +60,7 @@ class WatercolorSim {
       pigDiff: 0.12,    // Brownian pigment diffusion in free water
       settle: 0.08,     // global time scale on Curtis deposition rates
       lift: 0.012,      // resolubility: rewet-lift rate per step
+      saltPush: 3.0,    // salt starburst pigment repulsion (texels)
       drySpeed: 1.0,    // user "dry fast" multiplier
     };
     this.params.paperSlope = this.paper.paperSlope;
@@ -115,7 +116,7 @@ class WatercolorSim {
 
   _initPrograms() {
     this.progs = {};
-    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'clear']) {
+    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'clear']) {
       this.progs[name] = this._program(name, SHADERS[name]);
     }
   }
@@ -363,10 +364,11 @@ class WatercolorSim {
       this.flow.swap();
       this.sat.swap();
 
-      // 5. pigment advection + diffusion
+      // 5. pigment advection + diffusion (+ salt starburst repulsion)
       this._bindOutputs(this.susp.map((pr) => pr.write));
-      p = this._use('advect', [['uFlow', this.flow.read], ...this._suspInputs()]);
+      p = this._use('advect', [['uFlow', this.flow.read], ['uSat', this.sat.read], ...this._suspInputs()]);
       gl.uniform1f(p.uniforms.uPigDiff, P.pigDiff);
+      gl.uniform1f(p.uniforms.uSaltPush, P.saltPush);
       this._draw();
       this.susp.forEach((pr) => pr.swap());
 
@@ -382,6 +384,7 @@ class WatercolorSim {
         gl.uniform4fv(p.uniforms.uRho, this._pigParams.rho);
         gl.uniform4fv(p.uniforms.uOmega, this._pigParams.omega);
         gl.uniform4fv(p.uniforms.uGamma, this._pigParams.gamma);
+        gl.uniform4fv(p.uniforms.uGrain, this._pigParams.grain);
         gl.uniform1f(p.uniforms.uSettle, P.settle);
         gl.uniform1f(p.uniforms.uLift, P.lift);
         this._draw();
@@ -401,13 +404,32 @@ class WatercolorSim {
     ]);
     const n = PIG_TEXTURES * 4;
     const K = new Float32Array(n * 3), S = new Float32Array(n * 3);
-    PIGMENTS.forEach((pg, i) => { K.set(pg.K, i * 3); S.set(pg.S, i * 3); });
+    CHANNELS.forEach((pg, i) => { if (pg) { K.set(pg.K, i * 3); S.set(pg.S, i * 3); } });
     gl.uniform3fv(p.uniforms.uK, K);
     gl.uniform3fv(p.uniforms.uS, S);
     gl.uniform3fv(p.uniforms.uPaperColor, this.paper.color);
     this._ensurePigParams();
     gl.uniform4fv(p.uniforms.uGamma, this._pigParams.gamma);
+    gl.uniform4fv(p.uniforms.uGrain, this._pigParams.grain);
+    gl.uniform1f(p.uniforms.uWetView, this.wetView ? 1 : 0);
     this._draw();
+  }
+
+  // Sprinkle salt into the wash: grains soak water and shove pigment into
+  // starbursts while the paper is in the damp band.
+  sprinkleSalt(xCss, yCss, radiusCss) {
+    const gl = this.gl;
+    const cssW = this.canvas.clientWidth || window.innerWidth;
+    const cssH = this.canvas.clientHeight || window.innerHeight;
+    this._bindOutputs([this.sat.write]);
+    const p = this._use('salt', [['uSat', this.sat.read]]);
+    gl.uniform2f(p.uniforms.uCenter, xCss / cssW, 1 - yCss / cssH);
+    gl.uniform1f(p.uniforms.uRadius, radiusCss / cssW);
+    gl.uniform2f(p.uniforms.uAspect, 1.0, cssH / cssW);
+    gl.uniform1f(p.uniforms.uSeed, Math.random() * 100);
+    gl.uniform1f(p.uniforms.uDensity, 0.06);
+    this._draw();
+    this.sat.swap();
   }
 
   // Average pigment mixture + water under a brush footprint (css px), used
@@ -443,20 +465,23 @@ class WatercolorSim {
   }
 
   _ensurePigParams() {
-    if (this._pigParams && this._pigVersion === PIGMENTS.version) return;
-    this._pigVersion = PIGMENTS.version;
+    if (this._pigParams && this._pigVersion === CHANNELS.version) return;
+    this._pigVersion = CHANNELS.version;
     const n = PIG_TEXTURES * 4;
     this._pigParams = this._pigParams || {
-      rho: new Float32Array(n), omega: new Float32Array(n), gamma: new Float32Array(n),
+      rho: new Float32Array(n), omega: new Float32Array(n), gamma: new Float32Array(n), grain: new Float32Array(n),
     };
     this._pigParams.rho.fill(0);
     this._pigParams.gamma.fill(0);
+    this._pigParams.grain.fill(0);
     // omega is a divisor: default 1 for unused channels to avoid div-by-zero
     this._pigParams.omega.fill(1);
-    PIGMENTS.forEach((pg, i) => {
+    CHANNELS.forEach((pg, i) => {
+      if (!pg) return;
       this._pigParams.rho[i] = pg.rho;
       this._pigParams.omega[i] = pg.omega;
       this._pigParams.gamma[i] = pg.gamma;
+      this._pigParams.grain[i] = pg.grain;
     });
   }
 }

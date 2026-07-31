@@ -61,7 +61,8 @@ const LOGBOOK = (() => {
         recordedAt: new Date(t0).toISOString(),
         durationFrames: frame,
         viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 },
-        pigments: PIGMENTS.map((p) => `${p.name} (${p.ci})`),
+        channels: CHANNELS.map((p) => (p ? `${p.name} (${p.ci})` : null)),
+        pans: PANS.map((p) => p.paint.name),
         ...extra,
         events,
       };
@@ -111,12 +112,12 @@ const REPLAY = (() => {
         const e = queue[idx++];
         const target = e.on === 'tray' ? window.tray : window.sim;
         if (e.t === 'splat' && target) {
-          const pig = new Float32Array(PIGMENTS.length);
+          const pig = new Float32Array(N_CHANNELS);
           for (const [k, v] of Object.entries(e.pig || {})) pig[+k] = v;
           (target.__rawSplat || target.splat)(e.x, e.y, e.r, e.w, pig, e.wet, e.scrub || 0);
         } else if (e.t === 'clear' && window.sim) sim.clearAll();
         else if (e.t === 'palette') {
-          setActivePalette(e.ids);
+          assignPan(e.slot, e.id);
           if (window.__refreshPalette) window.__refreshPalette();
         }
         else if (e.t === 'trayRinse' && window.tray) {
@@ -124,6 +125,7 @@ const REPLAY = (() => {
           else tray.clearAll();
         }
         else if (e.t === 'paper' && window.sim) sim.setPaper(e.name);
+        else if (e.t === 'salt' && window.sim) sim.sprinkleSalt(e.x, e.y, e.r);
         else if (e.t === 'drySpeed' && window.sim) sim.params.drySpeed = e.v;
         else if (e.t === 'tilt' && window.sim) sim.params.tilt = e.v;
       }

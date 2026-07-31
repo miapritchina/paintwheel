@@ -36,7 +36,7 @@
   LOGBOOK.attach(sim, 'paper');
   LOGBOOK.attach(tray, 'tray');
 
-  const NPIG = PIGMENTS.length;
+  const NPIG = N_CHANNELS; // brush carries per-CHANNEL loads
 
   // -------------------------------------------------------------- brush ---
   // water: 0 (bone dry) .. 1 (dripping). pig: per-pigment load on the hairs.
@@ -63,7 +63,7 @@
     const total = brushTotal();
     // thickness scales with load so a heavy brush looks like creamy masstone
     // and a nearly-spent one shows a pale tint
-    const color = total > 0.01 ? PIGMENTS.kmColor(brush.pig, 1.5 + 12 * Math.min(total, 1.2)) : 'rgb(238,236,230)';
+    const color = total > 0.01 ? CHANNELS.kmColor(brush.pig, 1.5 + 12 * Math.min(total, 1.2)) : 'rgb(238,236,230)';
     brushview.style.background = color;
     brushview.style.borderColor = `rgba(160,200,255,${0.25 + 0.6 * brush.water})`;
     // wet brush looks glossy, dry brush matte
@@ -82,7 +82,8 @@
 
   function rebuildPans() {
     paletteEl.innerHTML = '';
-    PIGMENTS.forEach((p, i) => {
+    PANS.forEach((pan, i) => {
+      const p = pan.paint;
       const wrap = document.createElement('div');
       wrap.className = 'panwrap';
       const b = document.createElement('button');
@@ -91,11 +92,12 @@
       b.title = `${p.name} (${p.ci})`;
       b.addEventListener('pointerdown', () => {
         // a wetter brush picks up more paint; tap repeatedly for a creamy load
+        const chan = PANS[i].chan;
         const pickup = 0.2 + 0.8 * brush.water;
-        brush.pig[i] = Math.min(1.2, brush.pig[i] + 0.8 * pickup);
+        brush.pig[chan] = Math.min(1.2, brush.pig[chan] + 0.8 * pickup);
         brush.water = Math.max(brush.water - 0.04, 0);
-        LOGBOOK.log('dipPan', { pig: i, name: p.name, water: Math.round(brush.water * 100) / 100 });
-        updateBrushView(`${p.name} (${p.ci})`);
+        LOGBOOK.log('dipPan', { pig: chan, name: PANS[i].paint.name, water: Math.round(brush.water * 100) / 100 });
+        updateBrushView(`${PANS[i].paint.name} (${PANS[i].paint.ci})`);
       });
       const label = document.createElement('div');
       label.className = 'panlabel';
@@ -160,7 +162,8 @@
 
   function rebuildBox() {
     boxSlots.innerHTML = '';
-    PIGMENTS.forEach((p, i) => {
+    PANS.forEach((pan, i) => {
+      const p = pan.paint;
       const wrap = document.createElement('div');
       wrap.className = 'panwrap';
       const b = document.createElement('button');
@@ -178,15 +181,15 @@
       const wrap = document.createElement('div');
       wrap.className = 'panwrap';
       const b = document.createElement('button');
-      const inUse = PIGMENTS.ids.includes(p.id);
+      const inUse = PANS.some((pan) => pan.paint.id === p.id);
       b.className = 'pan' + (inUse ? ' inuse' : '');
       b.style.background = p.swatch;
-      b.title = `${p.name} (${p.ci}) — tint ${p.tint}, granulation ${p.gamma}, staining ${p.omega}`;
+      b.title = `${p.name} (${p.ci}) — tint ${p.tint}, granulation ${p.gamma}, grain ${p.grain}, staining ${p.omega}`;
       b.addEventListener('click', () => {
-        const ids = PIGMENTS.ids.slice();
-        ids[selectedSlot] = p.id;
-        setActivePalette(ids);
-        LOGBOOK.log('palette', { ids });
+        // swapping a pan binds a NEW channel: strokes already painted with
+        // the old paint keep their color and identity
+        assignPan(selectedSlot, p.id);
+        LOGBOOK.log('palette', { slot: selectedSlot, id: p.id });
         rebuildBox();
         rebuildPans();
         updateBrushView(`${p.name} now in pan ${selectedSlot + 1}`);
@@ -233,6 +236,23 @@
     tiltBtn.style.background = tiltOn ? 'rgba(120,180,255,0.35)' : '';
     if (tiltOn) window.addEventListener('deviceorientation', onOrient);
     else { window.removeEventListener('deviceorientation', onOrient); sim.params.tilt = [0, 0]; }
+  });
+
+  // Salt mode: taps sprinkle salt instead of painting. Timing matters like
+  // real salt — it only textures a wash that is damp, not soaked or dry.
+  const saltBtn = document.getElementById('salt');
+  let saltMode = false;
+  saltBtn.addEventListener('click', () => {
+    saltMode = !saltMode;
+    saltBtn.style.background = saltMode ? 'rgba(255,255,255,0.4)' : '';
+    updateBrushView(saltMode ? 'Salt: tap the painting to sprinkle' : undefined);
+  });
+
+  const wetviewBtn = document.getElementById('wetview');
+  wetviewBtn.addEventListener('click', () => {
+    sim.wetView = !sim.wetView;
+    wetviewBtn.style.background = sim.wetView ? 'rgba(120,180,255,0.35)' : '';
+    updateBrushView(sim.wetView ? 'Wetness view: blue=wet, teal=satin, amber=damp' : undefined);
   });
 
   document.getElementById('log').addEventListener('click', () => {
@@ -295,6 +315,12 @@
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
+    if (saltMode) {
+      const r = Number(sizeEl.value) * 1.6;
+      sim.sprinkleSalt(e.offsetX, e.offsetY, r);
+      LOGBOOK.log('salt', { x: Math.round(e.offsetX), y: Math.round(e.offsetY), r: Math.round(r) });
+      return;
+    }
     painting = true;
     last = null;
     strokeTo(e.offsetX, e.offsetY, e.pressure || 0.5);

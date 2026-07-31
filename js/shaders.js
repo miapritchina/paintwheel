@@ -90,7 +90,10 @@ void main() {
                        + uFiberAmp * 0.5 * (fiberH + fiberV), 0.0, 1.0);
   float capacity = uCapBase + uCapVar * fbm(p * 0.02 + 91.7);
   float fibers = vnoise(p * 0.6 + 3.1);
-  frag = vec4(height, capacity, fibers, 1.0);
+  // w: the coarse structure alone — coarse-grained pigments (high grain
+  // parameter) settle by this field, fine ones by the full tooth in x
+  float coarse = clamp(0.5 + uGrainAmp * (grain - 0.5) * 1.6, 0.0, 1.0);
+  frag = vec4(height, capacity, fibers, coarse);
 }`;
 
 // ---------------------------------------------------------------- splat ----
@@ -285,6 +288,13 @@ void main() {
   s.x = max(s.x - uDt * uSatEvap, 0.0);
   s.y = max(s.y, w);
 
+  // salt grains soak up nearby water and slowly dissolve while wet
+  if (s.z > 0.0) {
+    float soak = min(uDt * 0.0025 * s.z, h);
+    h -= soak;
+    s.z = max(s.z - uDt * 0.0012 * smoothstep(0.0005, 0.01, h + soak), 0.0);
+  }
+
   oFlow = vec4(h, f.yz, w);
   oSat = s;
 }`;
@@ -336,13 +346,27 @@ void main() {
 SHADERS.advect = `#version 300 es
 ${COMMON}
 uniform sampler2D uFlow;
+uniform sampler2D uSat;
 ${RP.map((i) => `uniform sampler2D uSusp${i};`).join('\n')}
 uniform float uPigDiff;
+uniform float uSaltPush;
 ${RP.map((i) => `layout(location=${i}) out vec4 oSusp${i};`).join('\n')}
 
 void main() {
   vec4 f = texture(uFlow, vUV);
   vec2 back = vUV - f.yz * uDt * uTexel;
+
+  // salt: a dissolving grain draws water toward itself and shoves pigment
+  // outward, leaving the pale starburst. Active only while the wash is in
+  // the damp band — too wet and the salt just dissolves, too dry and it
+  // merely sits on the surface (like real salt timing).
+  if (uSaltPush > 0.0) {
+    vec2 e2 = uTexel * 2.0;
+    vec2 gs = 0.5 * vec2(texture(uSat, vUV + vec2(e2.x, 0.0)).z - texture(uSat, vUV - vec2(e2.x, 0.0)).z,
+                         texture(uSat, vUV + vec2(0.0, e2.y)).z - texture(uSat, vUV - vec2(0.0, e2.y)).z);
+    float dampBand = smoothstep(0.0005, 0.004, f.x) * (1.0 - smoothstep(0.03, 0.1, f.x));
+    back += gs * uSaltPush * uTexel * dampBand;
+  }
 ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, back);`).join('\n')}
 
   float mob = f.w * smoothstep(0.0005, 0.01, f.x);
@@ -375,6 +399,7 @@ ${RP.map((i) => `uniform sampler2D uDep${i};`).join('\n')}
 uniform vec4 uRho[${NP}];
 uniform vec4 uOmega[${NP}];
 uniform vec4 uGamma[${NP}];
+uniform vec4 uGrain[${NP}]; // granulation size: 0 fine tooth .. 1 coarse
 uniform float uSettle;
 uniform float uLift;
 ${RP.map((i) => `layout(location=${i}) out vec4 o${i};`).join('\n')}
@@ -386,7 +411,8 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);\n  vec4 d${i} = texture
 
   float h = f.x;
   float w = f.w;
-  float ph = pap.x;
+  float ph = pap.x;      // full tooth (fine structure)
+  float phc = pap.w;     // coarse grain structure only
 
   float dtn = uDt * uSettle;
   float dryBoost = 1.0 + 8.0 * (1.0 - smoothstep(0.0, 0.004, h));
@@ -394,8 +420,9 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);\n  vec4 d${i} = texture
   float wgate = max(w, 0.35);
 
 ${RP.map((i) => `  {
-    vec4 down = g${i} * clamp((vec4(1.0) - ph * uGamma[${i}]) * uRho[${i}] * dtn * dryBoost, 0.0, 1.0) * wgate;
-    vec4 up = d${i} * clamp((vec4(1.0) + (ph - 1.0) * uGamma[${i}]) / uOmega[${i}] * liftGate, 0.0, 1.0);
+    vec4 phE = mix(vec4(ph), vec4(phc), uGrain[${i}]); // per-paint grain scale
+    vec4 down = g${i} * clamp((vec4(1.0) - phE * uGamma[${i}]) * uRho[${i}] * dtn * dryBoost, 0.0, 1.0) * wgate;
+    vec4 up = d${i} * clamp((vec4(1.0) + (phE - 1.0) * uGamma[${i}]) / uOmega[${i}] * liftGate, 0.0, 1.0);
     down = min(down, max(vec4(1.0) - d${i}, 0.0));
     up = min(up, max(vec4(1.0) - g${i}, 0.0));
     o${i} = ${outs === 'susp' ? `g${i} - down + up` : `d${i} + down - up`};
@@ -415,7 +442,9 @@ ${RP.map((i) => `uniform sampler2D uDep${i};`).join('\n')}
 uniform vec3 uK[${NP * 4}];
 uniform vec3 uS[${NP * 4}];
 uniform vec4 uGamma[${NP}];
+uniform vec4 uGrain[${NP}];
 uniform vec3 uPaperColor;
+uniform float uWetView; // 1 = overlay wet/satin/damp stages
 out vec4 frag;
 
 // Kubelka-Munk reflectance & transmittance of the pigment layer; K,S are
@@ -441,9 +470,12 @@ void main() {
 ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);\n  vec4 d${i} = texture(uDep${i}, vUV);`).join('\n')}
 
   // Granulating pigment piles into paper valleys; at render scale that reads
-  // as optical thickness following the inverse of paper height.
-  float valley = 1.0 - pap.x;
-${RP.map((i) => `  d${i} *= mix(vec4(1.0), vec4(0.45) + 1.2 * valley, uGamma[${i}]);`).join('\n')}
+  // as optical thickness following the inverse of paper height. Each paint's
+  // grain parameter picks fine tooth vs coarse structure.
+${RP.map((i) => `  {
+    vec4 valley = 1.0 - mix(vec4(pap.x), vec4(pap.w), uGrain[${i}]);
+    d${i} *= mix(vec4(1.0), vec4(0.45) + 1.2 * valley, uGamma[${i}]);
+  }`).join('\n')}
 
   vec3 K = vec3(0.0), S = vec3(0.0);
   float total = 0.0;
@@ -490,7 +522,51 @@ ${RP.map((i) => `  {
   float spec = pow(max(dot(wn, normalize(lightDir + vec3(0.0, 0.0, 1.0))), 0.0), 60.0);
   Rtot += spec * 0.06 * smoothstep(0.002, 0.03, f.x);
 
+  // undissolved salt grains sit as pale specks
+  Rtot = mix(Rtot, vec3(0.96, 0.96, 0.94), 0.55 * smoothstep(0.3, 0.9, s.z));
+
+  // wetness view: the digital "look for the shine" — wet (blue), satin
+  // (teal), damp (amber); dry paper is untinted. This is the timing map:
+  // paint into shine = soft blends, touch damp = blooms.
+  if (uWetView > 0.5) {
+    float wet = smoothstep(0.012, 0.05, f.x);
+    float satin = smoothstep(0.0012, 0.012, f.x) * (1.0 - wet);
+    float damp = max(smoothstep(0.08, 0.35, s.x), f.w * 0.6) * (1.0 - wet - satin);
+    vec3 ov = vec3(0.25, 0.55, 1.0) * wet + vec3(0.2, 0.85, 0.8) * satin + vec3(1.0, 0.75, 0.25) * damp;
+    float amt = clamp(wet + satin + damp, 0.0, 1.0);
+    Rtot = mix(Rtot, ov, 0.4 * amt);
+  }
+
   frag = vec4(pow(clamp(Rtot, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
+}`;
+
+// ----------------------------------------------------------------- salt ----
+// Sprinkle salt grains into sat.z. Each grain is a sparse random cell.
+SHADERS.salt = `#version 300 es
+${COMMON}
+uniform sampler2D uSat;
+uniform vec2 uCenter;
+uniform float uRadius;
+uniform vec2 uAspect;
+uniform float uSeed;
+uniform float uDensity; // fraction of cells that get a grain
+out vec4 frag;
+
+float hash2(vec2 p) {
+  p = fract(p * vec2(127.1, 311.7) + uSeed);
+  p += dot(p, p + 19.19);
+  return fract(p.x * p.y);
+}
+
+void main() {
+  vec4 s = texture(uSat, vUV);
+  vec2 d = (vUV - uCenter) * uAspect;
+  float r = length(d) / max(uRadius, 1e-5);
+  if (r < 1.0) {
+    vec2 cell = floor(vUV / uTexel / 2.0); // grains ~2 cells wide
+    if (hash2(cell) > 1.0 - uDensity) s.z = min(s.z + 0.9, 1.0);
+  }
+  frag = s;
 }`;
 
 // ---------------------------------------------------------------- clear ----

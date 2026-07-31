@@ -71,6 +71,25 @@ stateful — it carries water and a 16-pigment load:
 - **Paper picker**: Cold press / Hot press / Rough / Toned cream — different
   tooth, absorbency and tint (switching gives a fresh sheet).
 
+## Timing tools
+
+- **👁 Wetness view** — the digital "look for the shine": blue = wet
+  (paint into it for soft blends), teal = satin (controlled soft edges),
+  amber = damp (touching it blooms), untinted = dry (crisp edges, glazing).
+- **🧂 Salt** — toggle, then tap the painting. Grains soak water and shove
+  pigment into starbursts; like real salt it only textures a wash caught in
+  the damp band — too wet and it dissolves, too dry and nothing happens.
+
+## Paint box & channels
+
+The working palette is 8 pans chosen from the full paint box. Swapping a
+pan's paint binds a fresh simulation channel, so strokes already on paper
+keep the old paint's color and physics (16 channels total; heavy swapping
+in one sheet eventually recycles the oldest unused channel). Each paint is
+defined by mass tone + undertone colors (inverted to Kubelka-Munk K/S),
+tinting strength, density, staining, granulation strength, and granulation
+grain size (fine speckle vs coarse flocs).
+
 ## Session logs (for feedback & bug reports)
 
 The **Log** button exports the whole session as JSON: every pan dip, water
