@@ -444,6 +444,75 @@
   trayCanvas.addEventListener('pointerup', trayEnd);
   trayCanvas.addEventListener('pointercancel', trayEnd);
 
+  // -------------------------------------------------- persistence / PWA ---
+  // Snapshots the dried painting + workbench state; wet paint "dries"
+  // across reloads like a real sheet left overnight.
+  let lastSavedFrame = -1;
+  let saving = false;
+
+  async function saveState() {
+    if (saving || LOGBOOK.frame === lastSavedFrame) return;
+    saving = true;
+    try {
+      const snap = sim.readDeposits();
+      const traySnap = tray.readDeposits();
+      await STORE.put('state', {
+        v: 1,
+        savedAt: Date.now(),
+        paper: { name: sim.paperName, seed: sim.paperSeed },
+        channels: CHANNELS.map((c) => (c ? c.id : null)),
+        pans: PANS.map((p) => ({ id: p.paint.id, chan: p.chan })),
+        brush: { water: brush.water, pig: Array.from(brush.pig) },
+        seg,
+        painting: snap,
+        tray: traySnap,
+        log: LOGBOOK.export({ paper: sim.paperName }),
+      });
+      lastSavedFrame = LOGBOOK.frame;
+    } catch (e) { /* storage full or unavailable: skip silently */ }
+    saving = false;
+  }
+
+  async function restoreState() {
+    try {
+      const st = await STORE.get('state');
+      if (!st || st.v !== 1) return;
+      restoreBindings(st.channels, st.pans);
+      rebuildPans();
+      if (st.paper && st.paper.name) {
+        paperSel.value = st.paper.name;
+        sim.setPaper(st.paper.name, st.paper.seed);
+      }
+      if (st.painting) sim.writeDeposits(st.painting);
+      if (st.tray) tray.writeDeposits(st.tray);
+      if (st.brush) {
+        brush.water = st.brush.water;
+        brush.pig.set(st.brush.pig.slice(0, NPIG));
+      }
+      if (st.seg != null) setSeg(st.seg);
+      if (st.log) LOGBOOK.restore(st.log);
+      updateBrushView('Restored previous session');
+    } catch (e) { /* corrupt/missing state: start fresh */ }
+  }
+  restoreState();
+
+  setInterval(saveState, 20000);
+  window.addEventListener('pagehide', saveState);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveState();
+  });
+
+  document.getElementById('reset').addEventListener('click', async () => {
+    if (!window.confirm('Reset everything? This clears the painting, tray, palette and saved state.')) return;
+    await STORE.clear();
+    LOGBOOK.reset();
+    location.reload();
+  });
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+
   // --------------------------------------------------------------- loop ---
   window.addEventListener('resize', () => { sim.resize(); tray.resize(); });
 

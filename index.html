@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#201e1b">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
 <title>Paintwheel — Wet Watercolor</title>
 <style>
   :root {
@@ -279,6 +283,7 @@
         <button id="tilt" class="small">Tilt</button>
         <button id="save" class="small">Save</button>
         <button id="log" class="small" title="Export this session's strokes as JSON">Log</button>
+        <button id="reset" class="small" title="Clear painting, tray, palette and saved state">Reset</button>
       </div>
     </div>
   </div>
@@ -293,6 +298,7 @@
   <button id="boxclose">Done</button>
 </div>
 <script src="js/pigments.js"></script>
+<script src="js/store.js"></script>
 <script src="js/logbook.js"></script>
 <script src="js/shaders.js"></script>
 <script src="js/sim.js"></script>

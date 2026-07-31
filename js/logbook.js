@@ -78,6 +78,14 @@ const LOGBOOK = (() => {
     },
 
     reset() { events = []; frame = 0; },
+
+    // Continue a persisted session's log after a reload.
+    restore(session) {
+      if (!session || !Array.isArray(session.events)) return;
+      events = session.events;
+      frame = session.durationFrames || (events.length ? events[events.length - 1].f + 1 : 0);
+      events.push({ f: frame, t: 'reloaded' });
+    },
   };
   return api;
 })();

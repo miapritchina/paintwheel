@@ -16,7 +16,8 @@ const PAPERS = {
 class WatercolorSim {
   constructor(canvas, opts = {}) {
     this.canvas = canvas;
-    this.paper = PAPERS[opts.paper || 'coldpress'];
+    this.paperName = opts.paper || 'coldpress';
+    this.paper = PAPERS[this.paperName];
     this.maxSim = opts.maxSim || 1024;
     const gl = canvas.getContext('webgl2', {
       alpha: false,
@@ -116,7 +117,7 @@ class WatercolorSim {
 
   _initPrograms() {
     this.progs = {};
-    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'clear']) {
+    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'clear', 'copy']) {
       this.progs[name] = this._program(name, SHADERS[name]);
     }
   }
@@ -176,6 +177,56 @@ class WatercolorSim {
 
     this.clearAll();
     this.regenPaper(Math.random() * 100);
+  }
+
+  // -------------------------------------------------------- persistence ---
+  // Deposited pigment quantized to 8 bits (scale 128 -> max 2.0); suspended
+  // pigment and free water are intentionally dropped: the painting "dries"
+  // across a reload, like leaving a real sheet overnight.
+  readDeposits() {
+    const gl = this.gl;
+    if (!this._readFbo) this._readFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._readFbo);
+    const layers = [];
+    const tmp = new Float32Array(this.simW * this.simH * 4);
+    try {
+      for (let i = 0; i < PIG_TEXTURES; i++) {
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.dep[i].read, 0);
+        gl.readPixels(0, 0, this.simW, this.simH, gl.RGBA, gl.FLOAT, tmp);
+        const q = new Uint8Array(tmp.length);
+        for (let j = 0; j < tmp.length; j++) q[j] = Math.min(255, Math.max(0, Math.round(tmp[j] * 128)));
+        layers.push(q);
+      }
+    } catch (e) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      return null;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { w: this.simW, h: this.simH, layers };
+  }
+
+  writeDeposits(snap) {
+    if (!snap || !snap.layers || snap.layers.length !== PIG_TEXTURES) return;
+    const gl = this.gl;
+    const tmpTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tmpTex);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, snap.w, snap.h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const f = new Float32Array(snap.w * snap.h * 4);
+    for (let i = 0; i < PIG_TEXTURES; i++) {
+      const q = snap.layers[i];
+      for (let j = 0; j < q.length; j++) f[j] = q[j] / 128;
+      gl.bindTexture(gl.TEXTURE_2D, tmpTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, snap.w, snap.h, gl.RGBA, gl.FLOAT, f);
+      this._bindOutputs([this.dep[i].write]);
+      this._use('copy', [['uTex', tmpTex]]);
+      this._draw();
+      this.dep[i].swap();
+    }
+    gl.deleteTexture(tmpTex);
   }
 
   // ---------------------------------------------------------- pass utils --
@@ -263,6 +314,7 @@ class WatercolorSim {
 
   regenPaper(seed) {
     const gl = this.gl;
+    this.paperSeed = seed;
     this._bindOutputs([this.paperTex]);
     const p = this._use('paper', []);
     gl.uniform1f(p.uniforms.uSeed, seed);
@@ -275,12 +327,13 @@ class WatercolorSim {
   }
 
   // Switch paper preset: regenerates the sheet (clears the painting).
-  setPaper(name) {
+  setPaper(name, seed) {
     if (!PAPERS[name]) return;
+    this.paperName = name;
     this.paper = PAPERS[name];
     this.params.paperSlope = this.paper.paperSlope;
     this.clearAll();
-    this.regenPaper(Math.random() * 100);
+    this.regenPaper(seed != null ? seed : Math.random() * 100);
   }
 
   // --------------------------------------------------------------- brush --

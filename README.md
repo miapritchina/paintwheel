@@ -130,6 +130,16 @@ way to report "this didn't behave like real watercolor".
 - `js/main.js` — UI, pointer/stylus input
 - `js/demo.js` — scripted showcase (blooms, strokes, granulation, backrun)
 
+## PWA & persistence
+
+The app is installable (Add to Home Screen on iPad/iPhone) and works
+offline after the first load. State survives reloads: the painting's
+deposited pigment, the tray's mixes, pan/channel bindings, brush load,
+paper choice and the session log are snapshotted to IndexedDB every 20 s
+and on page hide. Anything still wet "dries" across a reload — like
+leaving a real sheet overnight. **Reset** clears the painting, tray,
+palette and all saved state.
+
 ## Running
 
 Any static file server works:

@@ -22,7 +22,7 @@
 const PIG_TEXTURES = 4;
 const N_CHANNELS = PIG_TEXTURES * 4;
 
-const { PAINTBOX, CHANNELS, PANS, assignPan } = (() => {
+const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
   const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
   const arccoth = (x) => 0.5 * Math.log((x + 1) / (x - 1));
 
@@ -134,9 +134,18 @@ const { PAINTBOX, CHANNELS, PANS, assignPan } = (() => {
     channels.version++;
   }
 
+  // Restore exact channel/pan bindings from a persisted session.
+  function restore(channelIds, panList) {
+    channels.fill(null);
+    channelIds.forEach((id, i) => { if (id != null && box[id]) channels[i] = box[id]; });
+    pans.length = 0;
+    panList.forEach((p, slot) => { pans[slot] = { paint: box[p.id], chan: p.chan }; });
+    channels.version++;
+  }
+
   // default working palette (artist will finalize later)
   ['Lemon', 'Irgazin', 'B. Siena', 'Q. Pink', 'Ultram.', 'Prussian', 'C. Turq', 'Emerald']
     .forEach((short, slot) => assign(slot, box.findIndex((p) => p.short === short)));
 
-  return { PAINTBOX: box, CHANNELS: channels, PANS: pans, assignPan: assign };
+  return { PAINTBOX: box, CHANNELS: channels, PANS: pans, assignPan: assign, restoreBindings: restore };
 })();

@@ -575,3 +575,12 @@ ${COMMON}
 uniform vec4 uValue;
 out vec4 frag;
 void main() { frag = uValue; }`;
+
+// ----------------------------------------------------------------- copy ----
+// Blit a texture (used to restore persisted deposits, resampling if the
+// canvas size changed between sessions).
+SHADERS.copy = `#version 300 es
+${COMMON}
+uniform sampler2D uTex;
+out vec4 frag;
+void main() { frag = texture(uTex, vUV); }`;
