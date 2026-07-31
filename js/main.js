@@ -61,11 +61,26 @@
   dryBtn.addEventListener('pointerup', dryOff);
   dryBtn.addEventListener('pointerleave', dryOff);
   document.getElementById('demo').addEventListener('click', () => DEMO.start(sim));
+  document.getElementById('save').addEventListener('click', () => {
+    // render right before reading: the drawing buffer isn't preserved
+    sim.render();
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'watercolor.png';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    });
+  });
 
   // ------------------------------------------------------------- brush ---
+  // The brush carries finite water and pigment reservoirs that deplete over
+  // the stroke: strokes fade and end in dry-brush texture, like a real round.
   const pig = new Float32Array(8);
   let painting = false;
   let last = null;
+  let reservoir = 1;
 
   function dab(x, y, pressure) {
     DEMO.stop();
@@ -74,19 +89,25 @@
     const loadv = Number(loadEl.value) / 100;
     pig.fill(0);
     let water;
+    // wetter brushes hold more; a soaked brush outlasts several screen-widths
+    const res = 0.15 + 0.85 * reservoir;
     if (currentPig < 0) {
-      water = 0.01 + 0.09 * wet; // plain water: wet the sheet, lift pigment
+      water = (0.01 + 0.09 * wet) * res; // plain water: wet the sheet, lift paint
     } else {
-      water = 0.002 + 0.05 * wet;
-      pig[currentPig] = 0.10 * loadv * (0.4 + 0.6 * pressure);
+      water = (0.002 + 0.05 * wet) * res;
+      pig[currentPig] = 0.10 * loadv * (0.4 + 0.6 * pressure) * res;
     }
-    sim.splat(x, y, size, water * (0.5 + 0.5 * pressure), pig, wet);
+    sim.splat(x, y, size, water * (0.5 + 0.5 * pressure), pig, wet * res);
   }
 
   function strokeTo(x, y, pressure) {
     if (!last) { dab(x, y, pressure); last = { x, y }; return; }
     const dx = x - last.x, dy = y - last.y;
     const dist = Math.hypot(dx, dy);
+    // deplete the reservoirs with distance; wet brushes carry further
+    const wetv = Number(waterEl.value) / 100;
+    const range = 900 + 2600 * wetv; // px of stroke until mostly spent
+    reservoir *= Math.exp(-dist / range);
     const stepLen = Math.max(Number(sizeEl.value) * 0.3, 2);
     const n = Math.floor(dist / stepLen);
     for (let i = 1; i <= n; i++) {
@@ -101,6 +122,7 @@
     canvas.setPointerCapture(e.pointerId);
     painting = true;
     last = null;
+    reservoir = 1; // dip the brush
     strokeTo(e.offsetX, e.offsetY, e.pressure || 0.5);
   });
   canvas.addEventListener('pointermove', (e) => {
