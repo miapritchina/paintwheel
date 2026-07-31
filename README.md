@@ -47,6 +47,13 @@ Beyond the papers, the model borrows two effects:
 
 - **Depleting reservoirs**: the brush carries finite water and pigment;
   strokes fade and end in dry-brush tails. Dip again by lifting the stylus.
+- **Mixing well** (dashed swatch): tap it, then tap pigments to add parts —
+  the well shows the Kubelka-Munk color of the mixture; tap the well again to
+  paint with it (double-tap empties it). A mix is carried as real proportions
+  of its component pigments, so each keeps its physical behavior: an
+  ultramarine + quinacridone violet still granulates (the ultramarine part)
+  AND stains (the quinacridone part), and the components separate in a wet
+  wash just like real paint.
 - **Plain-water brush** (droplet swatch): pre-wet the sheet for wet-on-wet,
   dilute a wash, trigger backruns on a drying wash, or scrub/lift dried
   paint — non-staining pigments (cerulean) lift, staining ones

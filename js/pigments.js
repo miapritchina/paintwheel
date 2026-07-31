@@ -30,7 +30,8 @@ const PIGMENTS = (() => {
   ];
 
   // Compute a UI swatch color: KM reflectance of a moderately thick layer
-  // over white paper, gamma-encoded for CSS.
+  // over white paper, gamma-encoded for CSS. Exposed as PIGMENTS.kmColor for
+  // the palette-mixing UI.
   function swatchColor(K, S, x) {
     const out = [0, 0, 0];
     for (let i = 0; i < 3; i++) {
@@ -48,8 +49,21 @@ const PIGMENTS = (() => {
     return `rgb(${out[0]},${out[1]},${out[2]})`;
   }
 
-  return defs.map((d) => ({
+  const list = defs.map((d) => ({
     ...d,
     swatch: swatchColor(d.K, d.S, 8.0),
   }));
+  // KM color of an arbitrary mixture: parts is an array of 8 weights.
+  list.kmColor = (parts, x = 8.0) => {
+    const K = [0, 0, 0], S = [0, 0, 0];
+    let total = 0;
+    parts.forEach((p, i) => { total += p; });
+    if (total <= 0) return 'rgb(240,238,232)';
+    parts.forEach((p, i) => {
+      const c = p / total;
+      for (let j = 0; j < 3; j++) { K[j] += c * list[i].K[j]; S[j] += c * list[i].S[j]; }
+    });
+    return swatchColor(K, S, x);
+  };
+  return list;
 })();

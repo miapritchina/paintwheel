@@ -16,37 +16,81 @@
   window.sim = sim; // for console tinkering / automated tests
 
   // ----------------------------------------------------------- palette ---
+  // currentPig: index into PIGMENTS, -1 = plain water, -2 = the custom mix.
+  // Mix mode: tapping pigment swatches adds parts to a physical mixture —
+  // each component keeps its own granulation/staining/density in the sim,
+  // so an ultramarine+rose mix still granulates AND stains, and separates
+  // in wet washes like real paint.
   const paletteEl = document.getElementById('palette');
   const pignameEl = document.getElementById('pigname');
-  let currentPig = 0; // index into PIGMENTS, or -1 for plain water
+  let currentPig = 0;
+  let mixMode = false;
+  const mixParts = new Float32Array(8);
 
   PIGMENTS.forEach((p, i) => {
     const b = document.createElement('button');
-    b.className = 'swatch' + (i === currentPig ? ' active' : '');
+    b.className = 'swatch';
     b.style.background = p.swatch;
     b.title = p.name;
     b.addEventListener('click', () => {
-      currentPig = i;
+      if (mixMode) {
+        mixParts[i] += 1;
+        currentPig = -2;
+      } else {
+        currentPig = i;
+      }
       updatePalette();
     });
     b.dataset.idx = i;
     paletteEl.appendChild(b);
   });
+
   const waterBtn = document.createElement('button');
   waterBtn.className = 'swatch water';
   waterBtn.title = 'Plain water (wet the paper / lift paint)';
   waterBtn.addEventListener('click', () => {
     currentPig = -1;
+    mixMode = false;
     updatePalette();
   });
   waterBtn.dataset.idx = -1;
   paletteEl.appendChild(waterBtn);
 
+  // the mixing well: shows the KM-predicted color of the current mixture
+  const mixBtn = document.createElement('button');
+  mixBtn.className = 'swatch';
+  mixBtn.style.border = '2px dashed rgba(255,255,255,0.5)';
+  mixBtn.title = 'Mixing well: toggle mix mode, then tap pigments to add parts. Tap again to paint with the mix. Double-tap to empty.';
+  mixBtn.addEventListener('click', () => {
+    if (mixMode && currentPig === -2 && mixParts.some((v) => v > 0)) {
+      mixMode = false; // done mixing, keep painting with the mix
+    } else {
+      mixMode = true;
+      if (mixParts.some((v) => v > 0)) currentPig = -2;
+    }
+    updatePalette();
+  });
+  mixBtn.addEventListener('dblclick', () => {
+    mixParts.fill(0);
+    mixMode = true;
+    updatePalette();
+  });
+  mixBtn.dataset.idx = -2;
+  paletteEl.appendChild(mixBtn);
+
+  function mixLabel() {
+    const parts = [];
+    mixParts.forEach((v, i) => { if (v > 0) parts.push(`${v}× ${PIGMENTS[i].name}`); });
+    return parts.length ? 'Mix: ' + parts.join(' + ') : 'Mixing well: tap pigments to add parts';
+  }
+
   function updatePalette() {
     for (const el of paletteEl.children) {
-      el.classList.toggle('active', Number(el.dataset.idx) === currentPig);
+      el.classList.toggle('active', Number(el.dataset.idx) === currentPig || (mixMode && Number(el.dataset.idx) === -2));
     }
-    pignameEl.textContent = currentPig < 0 ? 'Plain water' : PIGMENTS[currentPig].name;
+    mixBtn.style.background = PIGMENTS.kmColor(mixParts);
+    if (mixMode || currentPig === -2) pignameEl.textContent = mixLabel();
+    else pignameEl.textContent = currentPig < 0 ? 'Plain water' : PIGMENTS[currentPig].name;
   }
   updatePalette();
 
@@ -118,12 +162,20 @@
     let scrub = 0;
     // wetter brushes hold more; a soaked brush outlasts several screen-widths
     const res = 0.15 + 0.85 * reservoir;
-    if (currentPig < 0) {
+    if (currentPig === -1) {
       water = (0.01 + 0.09 * wet) * res; // plain water: wet the sheet, lift paint
       scrub = 0.08 * pressure; // clean brush picks up pigment as it passes
     } else {
       water = (0.002 + 0.05 * wet) * res;
-      pig[currentPig] = 0.10 * loadv * (0.4 + 0.6 * pressure) * res;
+      const amount = 0.10 * loadv * (0.4 + 0.6 * pressure) * res;
+      if (currentPig === -2) {
+        // custom mix: distribute the load across components by their parts
+        let total = 0;
+        mixParts.forEach((v) => { total += v; });
+        if (total > 0) mixParts.forEach((v, i) => { pig[i] = amount * (v / total); });
+      } else {
+        pig[currentPig] = amount;
+      }
     }
     sim.splat(x, y, size, water * (0.5 + 0.5 * pressure), pig, wet * res, scrub);
   }
