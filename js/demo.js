@@ -34,25 +34,25 @@ const DEMO = (() => {
 
     // 2. Wet-on-dry strokes: sharp edges, edge darkening, dry-brush tail
     ev.push([3.4, 4.6, (s, u) => {
-      const x = w * (0.12 + u * 0.55);
-      const y = h * 0.58 + Math.sin(u * Math.PI * 2.2) * h * 0.03;
+      const x = w * (0.1 + u * 0.42);
+      const y = h * 0.52 + Math.sin(u * Math.PI * 2.2) * h * 0.03;
       drop(s, x, y, w * 0.018, 0.02 * (1 - u * 0.75), 6, 0.35, 0.55 - u * 0.4); // burnt umber, drying out
     }]);
     ev.push([5.0, 6.0, (s, u) => {
-      const x = w * (0.15 + u * 0.45);
-      drop(s, x, h * 0.70, w * 0.02, 0.03, 2, 0.4, 0.85); // phthalo green juicy stroke
+      const x = w * (0.1 + u * 0.4);
+      drop(s, x, h * 0.63, w * 0.02, 0.03, 2, 0.4, 0.85); // phthalo green juicy stroke
     }]);
 
     // 3. Granulation wash: ultramarine flat wash lower right
     ev.push([6.4, 7.6, (s, u) => {
-      const x = w * (0.62 + 0.28 * ((u * 5) % 1));
-      const y = h * (0.55 + 0.3 * Math.floor(u * 5) / 5);
+      const x = w * (0.6 + 0.3 * ((u * 5) % 1));
+      const y = h * (0.62 + 0.28 * Math.floor(u * 5) / 5);
       drop(s, x, y, w * 0.035, 0.045, 0, 0.35, 0.9);
     }]);
 
     // 4. Backrun: drop clear water into the half-dried wash
     ev.push([11.5, 11.8, (s, u) => {
-      drop(s, w * 0.76, h * 0.68, w * 0.045, 0.09, -1, 0, 1.0);
+      drop(s, w * 0.75, h * 0.76, w * 0.045, 0.09, -1, 0, 1.0);
     }]);
 
     // 5. Rose + yellow wet-on-wet mixing patch, top right (KM green-free mix)
