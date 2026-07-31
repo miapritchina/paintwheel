@@ -26,23 +26,24 @@ class WatercolorSim {
     this.params = {
       substeps: 3,
       dt: 1.0,
-      grav: 1.6,        // water-surface slope pull
-      paperSlope: 0.6,  // paper relief influence on flow
-      visc: 0.06,       // drag (Curtis kappa, scaled for our dt)
-      edgeFlow: 0.25,   // outward drift at wash rim
-      maxSpeed: 0.8,    // CFL guard, cells/step
-      smooth: 0.1,      // height diffusion / surface tension stand-in
-      evap: 0.0005,     // bulk evaporation per step (MoXi eps_s range)
-      edgeEvap: 6.0,    // extra rim evaporation multiplier (edge darkening)
-      absorb: 0.015,    // shallow layer -> capillary layer
-      satEvap: 0.00025, // paper drying
+      grav: 6.0,        // water-surface slope pull (lubrication mobility)
+      paperSlope: 0.5,  // paper relief influence on flow
+      inertia: 0.8,     // velocity memory: lets drop impulses ripple outward
+      maran: 1.0,       // Marangoni strength: blooms in wet washes
+      edgeFlow: 0.03,   // outward drift at wash rim (contact line ~pinned)
+      maxSpeed: 0.6,    // CFL guard, cells/step
+      smooth: 0.04,     // height diffusion / surface tension stand-in
+      evap: 0.00002,    // bulk evaporation per step: pools live ~10-20 s
+      edgeEvap: 20.0,   // extra rim evaporation multiplier (edge darkening)
+      absorb: 0.0002,   // rate of exponential approach of sat -> capacity
+      satEvap: 0.00004, // paper drying
       wetThresh: 0.0008,
-      wick: 0.35,       // capillary diffusion rate
-      wickThresh: 0.28,
-      backrun: 0.5,     // saturation that re-wets a drying wash
-      pigDiff: 0.2,     // Brownian pigment diffusion in free water
-      settle: 1.0,      // global scale on Curtis deposition rates
-      lift: 1.0,
+      wick: 0.15,       // capillary diffusion rate
+      wickThresh: 0.18,
+      backrun: 0.35,    // fraction of fiber capacity that re-wets a wash
+      pigDiff: 0.12,    // Brownian pigment diffusion in free water
+      settle: 0.08,     // global time scale on Curtis deposition rates
+      lift: 3.0,
       drySpeed: 1.0,    // user "dry fast" multiplier
     };
 
@@ -234,6 +235,7 @@ class WatercolorSim {
     gl.uniform4f(p.uniforms.uPigA, pig[0], pig[1], pig[2], pig[3]);
     gl.uniform4f(p.uniforms.uPigB, pig[4], pig[5], pig[6], pig[7]);
     gl.uniform1f(p.uniforms.uWetness, wetness);
+    gl.uniform1f(p.uniforms.uPush, Math.min(0.6, water * 8.0));
     this._draw();
     this.flow.swap();
     this.suspA.swap();
@@ -247,11 +249,15 @@ class WatercolorSim {
     for (let s = 0; s < P.substeps; s++) {
       // 1. velocity
       this._bindOutputs([this.flow.write]);
-      let p = this._use('velocity', [['uFlow', this.flow.read], ['uPaper', this.paperTex]]);
+      let p = this._use('velocity', [
+        ['uFlow', this.flow.read], ['uPaper', this.paperTex],
+        ['uSuspA', this.suspA.read], ['uSuspB', this.suspB.read],
+      ]);
       gl.uniform1f(p.uniforms.uGrav, P.grav);
       gl.uniform1f(p.uniforms.uPaperSlope, P.paperSlope);
-      gl.uniform1f(p.uniforms.uVisc, P.visc);
+      gl.uniform1f(p.uniforms.uInertia, P.inertia);
       gl.uniform1f(p.uniforms.uEdgeFlow, P.edgeFlow);
+      gl.uniform1f(p.uniforms.uMaran, P.maran);
       gl.uniform1f(p.uniforms.uMaxSpeed, P.maxSpeed);
       this._draw();
       this.flow.swap();
@@ -332,6 +338,9 @@ class WatercolorSim {
       PIGMENTS.forEach((pg, i) => { K.set(pg.K, i * 3); S.set(pg.S, i * 3); });
       gl.uniform3fv(p.uniforms.uK, K);
       gl.uniform3fv(p.uniforms.uS, S);
+      const ga = PIGMENTS.map((pg) => pg.gamma);
+      gl.uniform4f(p.uniforms.uGammaA, ga[0], ga[1], ga[2], ga[3]);
+      gl.uniform4f(p.uniforms.uGammaB, ga[4], ga[5], ga[6], ga[7]);
       this._kmUploaded = true;
       this._kmProg = p;
     }

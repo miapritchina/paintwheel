@@ -117,9 +117,11 @@
   window.addEventListener('resize', () => sim.resize());
 
   function frame() {
-    DEMO.tick(sim);
-    sim.step();
-    sim.render();
+    if (!window.__PAUSED) {
+      DEMO.tick(sim);
+      sim.step();
+      sim.render();
+    }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

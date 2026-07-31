@@ -97,6 +97,7 @@ uniform float uWaterAmt;
 uniform vec4 uPigA;
 uniform vec4 uPigB;
 uniform float uWetness;    // 0 dry brush .. 1 flooded
+uniform float uPush;       // radial velocity impulse: a landing drop displaces water
 layout(location=0) out vec4 oFlow;
 layout(location=1) out vec4 oSuspA;
 layout(location=2) out vec4 oSuspB;
@@ -109,7 +110,7 @@ void main() {
 
   vec2 d = (vUV - uCenter) * uAspect;
   float r = length(d) / max(uRadius, 1e-5);
-  float m = 1.0 - smoothstep(0.55, 1.0, r);
+  float m = 1.0 - smoothstep(0.3, 1.0, r);
 
   // Dry-brush: with little water the brush only touches the raised tooth of
   // the paper; with lots of water it floods the valleys too.
@@ -121,6 +122,9 @@ void main() {
   if (m > 0.0) {
     f.x += uWaterAmt * m;
     f.w = max(f.w, smoothstep(0.0, 0.08, m * uWaterAmt * 40.0));
+    // outward shove where the dab lands on already-wet paper
+    float rim = smoothstep(0.15, 0.85, r);
+    f.yz += normalize(d + vec2(1e-6)) * (uPush * m * rim * f.w);
     ga += uPigA * m;
     gb += uPigB * m;
   }
@@ -134,17 +138,28 @@ SHADERS.velocity = `#version 300 es
 ${COMMON}
 uniform sampler2D uFlow;
 uniform sampler2D uPaper;
+uniform sampler2D uSuspA;
+uniform sampler2D uSuspB;
 uniform float uGrav;       // pull of water-surface slope
 uniform float uPaperSlope; // influence of paper relief on flow
-uniform float uVisc;       // drag
+uniform float uInertia;    // memory of previous velocity (drop impulses)
 uniform float uEdgeFlow;   // outward bias at wash boundary (edge darkening)
+uniform float uMaran;      // Marangoni: paint lowers surface tension
 uniform float uMaxSpeed;
 out vec4 frag;
 
+float pigTotal(vec2 uv) {
+  vec4 a = texture(uSuspA, uv);
+  vec4 b = texture(uSuspB, uv);
+  return dot(a, vec4(1.0)) + dot(b, vec4(1.0));
+}
+
+// Thin-film (lubrication) flow: for a sub-millimeter paint film inertia is
+// negligible, so velocity relaxes toward -mobility * grad(water surface).
+// This is unconditionally stable, unlike explicit shallow-water momentum.
 void main() {
   vec4 f = texture(uFlow, vUV);
   float h = f.x;
-  vec2 vel = f.yz;
   float w = f.w;
 
   vec4 fl = texture(uFlow, vUV - vec2(uTexel.x, 0.0));
@@ -157,21 +172,35 @@ void main() {
   float pb = texture(uPaper, vUV - vec2(0.0, uTexel.y)).x;
   float pt = texture(uPaper, vUV + vec2(0.0, uTexel.y)).x;
 
-  // water surface = depth + scaled paper relief
-  vec2 grad = 0.5 * vec2((fr.x + pr * uPaperSlope) - (fl.x + pl * uPaperSlope),
-                         (ft.x + pt * uPaperSlope) - (fb.x + pb * uPaperSlope));
-  vel += -uGrav * uDt * grad;
+  float ps = uPaperSlope * 0.05; // paper relief in water-height units
+  vec2 grad = 0.5 * vec2((fr.x + pr * ps) - (fl.x + pl * ps),
+                         (ft.x + pt * ps) - (fb.x + pb * ps));
 
-  // outward drift at the wash boundary: evaporation at the edge pulls water
-  // (and pigment) from the interior toward the rim -> dark edges when dry
-  float wavg = 0.25 * (fl.w + fr.w + ft.w + fb.w);
+  // deeper film moves easier (mobility ~ h^2 in lubrication theory; a soft
+  // saturating curve behaves better across our range)
+  float mob = h / (h + 0.02);
+  vec2 target = -uGrav * grad * mob;
+
+  // outward drift at the wash boundary: rim evaporation pulls interior fluid
+  // toward the edge -> pigment collects there as it dries (edge darkening)
   vec2 gw = 0.5 * vec2(fr.w - fl.w, ft.w - fb.w);
-  vel += -uEdgeFlow * uDt * gw * smoothstep(0.0, 0.01, h);
+  target += -uEdgeFlow * gw * smoothstep(0.0005, 0.01, h);
 
-  vel *= clamp(1.0 - uVisc * uDt, 0.0, 1.0);
+  // Marangoni flow: pigment/binder lowers surface tension, so fluid is pulled
+  // from painted regions toward clean water — this is what makes a loaded
+  // drop bloom outward through a wet wash. Surface tension follows the LOG of
+  // surfactant concentration (Gibbs isotherm), so the front keeps advancing
+  // even as the ring dilutes. Paper fibers modulate it -> feathering.
+  float fiber = 0.6 + 0.8 * texture(uPaper, vUV).z;
+  float pc = pigTotal(vUV);
+  vec2 gp = 0.5 * vec2(pigTotal(vUV + vec2(uTexel.x, 0.0)) - pigTotal(vUV - vec2(uTexel.x, 0.0)),
+                       pigTotal(vUV + vec2(0.0, uTexel.y)) - pigTotal(vUV - vec2(0.0, uTexel.y)));
+  target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.02, 0.08, h);
+
+  vec2 vel = mix(target, f.yz, uInertia);
 
   // no flow outside the wet region or in a nearly-dry film
-  vel *= w * smoothstep(0.0005, 0.006, h);
+  vel *= w * smoothstep(0.0003, 0.004, h);
 
   float sp = length(vel);
   if (sp > uMaxSpeed) vel *= uMaxSpeed / sp;
@@ -193,11 +222,19 @@ void main() {
   vec4 fb = texture(uFlow, vUV - vec2(0.0, uTexel.y));
   vec4 ft = texture(uFlow, vUV + vec2(0.0, uTexel.y));
 
-  // continuity: dh/dt = -div(h * vel), central differences
-  float div = 0.5 * ((fr.x * fr.y - fl.x * fl.y) + (ft.x * ft.z - fb.x * fb.z));
-  float h = f.x - uDt * div;
+  // continuity dh/dt = -div(h*vel), conservative upwind face fluxes
+  // (no checkerboard, mass-limited by the donor cell)
+  float uR = 0.5 * (f.y + fr.y);
+  float uL = 0.5 * (f.y + fl.y);
+  float vT = 0.5 * (f.z + ft.z);
+  float vB = 0.5 * (f.z + fb.z);
+  float fluxR = uR > 0.0 ? f.x * uR : fr.x * uR;
+  float fluxL = uL > 0.0 ? fl.x * uL : f.x * uL;
+  float fluxT = vT > 0.0 ? f.x * vT : ft.x * vT;
+  float fluxB = vB > 0.0 ? fb.x * vB : f.x * vB;
+  float h = f.x - uDt * (fluxR - fluxL + fluxT - fluxB);
 
-  // small diffusion keeps the explicit scheme stable and mimics surface tension
+  // small diffusion mimics surface tension leveling the film
   float avg = 0.25 * (fl.x + fr.x + fb.x + ft.x);
   h = mix(h, avg, uSmooth * f.w);
 
@@ -248,7 +285,7 @@ void main() {
     w = min(w + uDt * 6.0, 1.0);
   } else {
     float damp = smoothstep(0.05, 0.5, s.x);
-    w = max(w - uDt * 0.9 * (1.0 - 0.7 * damp), 0.0);
+    w = max(w - uDt * 0.12 * (1.0 - 0.7 * damp), 0.0);
   }
   // paper itself slowly dries
   s.x = max(s.x - uDt * uSatEvap, 0.0);
@@ -277,22 +314,29 @@ void main() {
   float cap = texture(uPaper, vUV).y;
 
   float transfer = 0.0;
+  float wetNbr = 0.0;
   for (int k = 0; k < 4; k++) {
     vec2 off = k == 0 ? vec2(uTexel.x, 0.0) : k == 1 ? vec2(-uTexel.x, 0.0)
              : k == 2 ? vec2(0.0, uTexel.y) : vec2(0.0, -uTexel.y);
     float sn = texture(uSat, vUV + off).x;
+    vec4 fn = texture(uFlow, vUV + off);
+    wetNbr = max(wetNbr, fn.w * smoothstep(0.001, 0.01, fn.x));
     // fibers pull water from the more saturated cell toward the drier one
     if (sn > uWickThresh) transfer += max(sn - s.x, 0.0);
     if (s.x > uWickThresh) transfer -= max(s.x - sn, 0.0);
   }
   s.x = clamp(s.x + uWick * uDt * transfer, 0.0, cap * 1.2);
 
-  // backrun: capillary water sneaking into a drying wash re-wets it and
-  // releases a little free water that shoves pigment ahead of the front
-  if (s.x > uBackrun && f.w < 0.6) {
-    f.w = max(f.w, 0.65);
-    f.x += uDt * 0.35 * (s.x - uBackrun);
-    s.x -= uDt * 0.3 * (s.x - uBackrun);
+  // backrun: an actively wet neighbor pushing water into a damp, drying
+  // region re-wets it and releases free water that shoves pigment ahead of
+  // the advancing front (the "cauliflower"). Requires a wet neighbor so a
+  // drying wash can't endlessly re-wet itself. Threshold relative to local
+  // fiber capacity keeps the front ragged.
+  float thresh = uBackrun * cap;
+  if (s.x > thresh && f.w < 0.6 && wetNbr > 0.7) {
+    f.w = max(f.w, 0.75);
+    f.x += uDt * 0.15 * (s.x - thresh) + 0.002;
+    s.x -= uDt * 0.12 * (s.x - thresh);
   }
   oFlow = f;
   oSat = s;
@@ -376,7 +420,7 @@ void main() {
   float dtn = uDt * uSettle;
   // As the wash loses its free water, settle rate ramps up so everything in
   // suspension lands where it stands (drying), and lifting shuts off.
-  float dryBoost = 1.0 + 8.0 * (1.0 - smoothstep(0.0, 0.01, h));
+  float dryBoost = 1.0 + 8.0 * (1.0 - smoothstep(0.0, 0.004, h));
   float liftGate = uLift * w * smoothstep(0.002, 0.015, h) * (0.3 + length(f.yz) * 2.0);
 
   vec4 downA = ga * clamp((vec4(1.0) - ph * uGammaA) * uRhoA * dtn * dryBoost, 0.0, 1.0) * max(w, 0.35);
@@ -408,6 +452,7 @@ uniform sampler2D uDepA;
 uniform sampler2D uDepB;
 uniform vec3 uK[8];
 uniform vec3 uS[8];
+uniform vec4 uGammaA, uGammaB; // granulation: deposits concentrate in valleys
 out vec4 frag;
 
 // Kubelka-Munk reflectance & transmittance of one pigment layer over a
@@ -430,6 +475,14 @@ void main() {
   vec4 gb = texture(uSuspB, vUV);
   vec4 da = texture(uDepA, vUV);
   vec4 db = texture(uDepB, vUV);
+
+  // Granulating pigment physically piles into paper valleys; at render scale
+  // that reads as optical thickness following the inverse of paper height.
+  float valley = 1.0 - pap.x;
+  vec4 granA = mix(vec4(1.0), vec4(0.45) + 1.2 * valley, uGammaA);
+  vec4 granB = mix(vec4(1.0), vec4(0.45) + 1.2 * valley, uGammaB);
+  da *= granA;
+  db *= granB;
 
   // total optical thickness per pigment (suspended + deposited)
   float x[8];
@@ -461,8 +514,8 @@ void main() {
   }
 
   // wet areas look darker & glossier
-  float wetvis = clamp(f.w * 0.5 + smoothstep(0.0, 0.04, f.x) * 0.6 + s.x * 0.15, 0.0, 1.0);
-  Rtot *= mix(1.0, 0.86, wetvis);
+  float wetvis = clamp(f.w * 0.35 + smoothstep(0.0, 0.04, f.x) * 0.55 + s.x * 0.08, 0.0, 1.0);
+  Rtot *= mix(1.0, 0.89, wetvis);
 
   // faint specular sheen off the water film surface
   float wx = texture(uFlow, vUV + vec2(e.x, 0.0)).x - texture(uFlow, vUV - vec2(e.x, 0.0)).x;
