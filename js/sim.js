@@ -1,5 +1,6 @@
 // WebGL2 engine for the watercolor simulation: texture ping-pong, MRT passes,
-// and the per-frame pipeline described in shaders.js.
+// and the per-frame pipeline described in shaders.js. Pigment concentrations
+// live in PIG_TEXTURES RGBA pairs (16 pigments), suspended + deposited.
 
 'use strict';
 
@@ -17,10 +18,13 @@ class WatercolorSim {
     if (!gl) throw new Error('WebGL2 is not supported on this device/browser.');
     this.gl = gl;
 
-    // RGBA16F is filterable in core WebGL2; renderability needs one of these.
     const extF = gl.getExtension('EXT_color_buffer_float');
     const extHF = gl.getExtension('EXT_color_buffer_half_float');
     if (!extF && !extHF) throw new Error('Floating-point render targets are not supported.');
+    const maxAttach = gl.getParameter(gl.MAX_COLOR_ATTACHMENTS);
+    if (maxAttach < PIG_TEXTURES + 1) {
+      throw new Error(`This device supports only ${maxAttach} MRT attachments; ${PIG_TEXTURES + 1} needed.`);
+    }
 
     // Tunable physical parameters (see Curtis et al. 1997, Chu & Tai 2005).
     this.params = {
@@ -30,7 +34,7 @@ class WatercolorSim {
       paperSlope: 0.5,  // paper relief influence on flow
       inertia: 0.8,     // velocity memory: lets drop impulses ripple outward
       maran: 1.0,       // Marangoni strength: blooms in wet washes
-      tilt: [0, 0],     // gravity vector from device tilt (uv units/step)
+      tilt: [0, 0],     // gravity vector from device tilt
       edgeFlow: 0.03,   // outward drift at wash rim (contact line ~pinned)
       maxSpeed: 0.6,    // CFL guard, cells/step
       smooth: 0.04,     // height diffusion / surface tension stand-in
@@ -98,7 +102,7 @@ class WatercolorSim {
 
   _initPrograms() {
     this.progs = {};
-    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transfer', 'render', 'clear']) {
+    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'clear']) {
       this.progs[name] = this._program(name, SHADERS[name]);
     }
   }
@@ -119,6 +123,11 @@ class WatercolorSim {
     return { read: this._makeTexture(w, h), write: this._makeTexture(w, h), swap() { const t = this.read; this.read = this.write; this.write = t; } };
   }
 
+  _deletePair(p) {
+    this.gl.deleteTexture(p.read);
+    this.gl.deleteTexture(p.write);
+  }
+
   // ------------------------------------------------------------- sizing ---
   resize() {
     const gl = this.gl;
@@ -128,8 +137,6 @@ class WatercolorSim {
     this.canvas.width = Math.round(cssW * dpr);
     this.canvas.height = Math.round(cssH * dpr);
 
-    // Sim grid: cap the long side; enough for convincing detail, cheap enough
-    // for phones. Display shader upsamples with paper detail on top.
     const MAXSIM = 1024;
     const scale = Math.min(1, MAXSIM / Math.max(cssW, cssH));
     const w = Math.max(64, Math.round(cssW * scale));
@@ -139,9 +146,16 @@ class WatercolorSim {
     this.simH = h;
     this.texel = [1 / w, 1 / h];
 
-    for (const p of ['flow', 'sat', 'suspA', 'suspB', 'depA', 'depB']) {
-      if (this[p]) { gl.deleteTexture(this[p].read); gl.deleteTexture(this[p].write); }
+    for (const p of ['flow', 'sat']) {
+      if (this[p]) this._deletePair(this[p]);
       this[p] = this._makePair(w, h);
+    }
+    if (this.susp) { this.susp.forEach((p) => this._deletePair(p)); this.dep.forEach((p) => this._deletePair(p)); }
+    this.susp = [];
+    this.dep = [];
+    for (let i = 0; i < PIG_TEXTURES; i++) {
+      this.susp.push(this._makePair(w, h));
+      this.dep.push(this._makePair(w, h));
     }
     if (this.paperTex) gl.deleteTexture(this.paperTex);
     this.paperTex = this._makeTexture(w, h);
@@ -160,8 +174,7 @@ class WatercolorSim {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, textures[i], 0);
       bufs.push(gl.COLOR_ATTACHMENT0 + i);
     }
-    // detach leftovers from previous MRT passes
-    for (let i = textures.length; i < 4; i++) {
+    for (let i = textures.length; i < PIG_TEXTURES + 1; i++) {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, null, 0);
     }
     gl.drawBuffers(bufs);
@@ -191,11 +204,20 @@ class WatercolorSim {
     gl.bindVertexArray(null);
   }
 
+  _suspInputs() {
+    return this.susp.map((p, i) => [`uSusp${i}`, p.read]);
+  }
+
+  _depInputs() {
+    return this.dep.map((p, i) => [`uDep${i}`, p.read]);
+  }
+
   // --------------------------------------------------------------- state --
   clearAll() {
     const gl = this.gl;
-    for (const p of ['flow', 'sat', 'suspA', 'suspB', 'depA', 'depB']) {
-      for (const t of [this[p].read, this[p].write]) {
+    const pairs = [this.flow, this.sat, ...this.susp, ...this.dep];
+    for (const pair of pairs) {
+      for (const t of [pair.read, pair.write]) {
         this._bindOutputs([t]);
         const pr = this._use('clear', []);
         gl.uniform4f(pr.uniforms.uValue, 0, 0, 0, 0);
@@ -213,7 +235,7 @@ class WatercolorSim {
   }
 
   // --------------------------------------------------------------- brush --
-  // pig: Float32Array(8) of pigment amounts; water in [0..~0.1]; radius px(css)
+  // pig: Float32Array(16) of pigment amounts; water in [0..~0.1]
   splat(xCss, yCss, radiusCss, water, pig, wetness, scrub = 0) {
     const gl = this.gl;
     const cssW = this.canvas.clientWidth || window.innerWidth;
@@ -222,26 +244,25 @@ class WatercolorSim {
     const v = 1 - yCss / cssH;
     const aspect = cssW / cssH;
 
-    this._bindOutputs([this.flow.write, this.suspA.write, this.suspB.write]);
+    this._bindOutputs([this.flow.write, ...this.susp.map((p) => p.write)]);
     const p = this._use('splat', [
       ['uFlow', this.flow.read],
-      ['uSuspA', this.suspA.read],
-      ['uSuspB', this.suspB.read],
+      ...this._suspInputs(),
       ['uPaper', this.paperTex],
     ]);
     gl.uniform2f(p.uniforms.uCenter, u, v);
     gl.uniform1f(p.uniforms.uRadius, radiusCss / cssW);
     gl.uniform2f(p.uniforms.uAspect, 1.0, 1.0 / aspect);
     gl.uniform1f(p.uniforms.uWaterAmt, water);
-    gl.uniform4f(p.uniforms.uPigA, pig[0], pig[1], pig[2], pig[3]);
-    gl.uniform4f(p.uniforms.uPigB, pig[4], pig[5], pig[6], pig[7]);
+    for (let i = 0; i < PIG_TEXTURES; i++) {
+      gl.uniform4f(p.uniforms[`uPig${i}`], pig[i * 4], pig[i * 4 + 1], pig[i * 4 + 2], pig[i * 4 + 3]);
+    }
     gl.uniform1f(p.uniforms.uWetness, wetness);
     gl.uniform1f(p.uniforms.uPush, Math.min(0.6, water * 8.0));
     gl.uniform1f(p.uniforms.uScrub, scrub);
     this._draw();
     this.flow.swap();
-    this.suspA.swap();
-    this.suspB.swap();
+    this.susp.forEach((pr) => pr.swap());
   }
 
   // ---------------------------------------------------------------- step --
@@ -253,7 +274,7 @@ class WatercolorSim {
       this._bindOutputs([this.flow.write]);
       let p = this._use('velocity', [
         ['uFlow', this.flow.read], ['uPaper', this.paperTex],
-        ['uSuspA', this.suspA.read], ['uSuspB', this.suspB.read],
+        ...this._suspInputs(),
       ]);
       gl.uniform1f(p.uniforms.uGrav, P.grav);
       gl.uniform1f(p.uniforms.uPaperSlope, P.paperSlope);
@@ -295,35 +316,30 @@ class WatercolorSim {
       this.sat.swap();
 
       // 5. pigment advection + diffusion
-      this._bindOutputs([this.suspA.write, this.suspB.write]);
-      p = this._use('advect', [['uFlow', this.flow.read], ['uSuspA', this.suspA.read], ['uSuspB', this.suspB.read]]);
+      this._bindOutputs(this.susp.map((pr) => pr.write));
+      p = this._use('advect', [['uFlow', this.flow.read], ...this._suspInputs()]);
       gl.uniform1f(p.uniforms.uPigDiff, P.pigDiff);
       this._draw();
-      this.suspA.swap();
-      this.suspB.swap();
+      this.susp.forEach((pr) => pr.swap());
 
-      // 6. deposition / lifting
-      this._bindOutputs([this.suspA.write, this.suspB.write, this.depA.write, this.depB.write]);
-      p = this._use('transfer', [
-        ['uFlow', this.flow.read], ['uPaper', this.paperTex],
-        ['uSuspA', this.suspA.read], ['uSuspB', this.suspB.read],
-        ['uDepA', this.depA.read], ['uDepB', this.depB.read],
-      ]);
-      const g = (k) => PIGMENTS.map((pg) => pg[k]);
-      const rho = g('rho'), om = g('omega'), ga = g('gamma');
-      gl.uniform4f(p.uniforms.uRhoA, rho[0], rho[1], rho[2], rho[3]);
-      gl.uniform4f(p.uniforms.uRhoB, rho[4], rho[5], rho[6], rho[7]);
-      gl.uniform4f(p.uniforms.uOmegaA, om[0], om[1], om[2], om[3]);
-      gl.uniform4f(p.uniforms.uOmegaB, om[4], om[5], om[6], om[7]);
-      gl.uniform4f(p.uniforms.uGammaA, ga[0], ga[1], ga[2], ga[3]);
-      gl.uniform4f(p.uniforms.uGammaB, ga[4], ga[5], ga[6], ga[7]);
-      gl.uniform1f(p.uniforms.uSettle, P.settle);
-      gl.uniform1f(p.uniforms.uLift, P.lift);
-      this._draw();
-      this.suspA.swap();
-      this.suspB.swap();
-      this.depA.swap();
-      this.depB.swap();
+      // 6. deposition / lifting: two draws over the same pre-pass state
+      // (suspension update, then deposit update), swap everything after.
+      this._ensurePigParams();
+      for (const [prog, targets] of [['transferSusp', this.susp], ['transferDep', this.dep]]) {
+        this._bindOutputs(targets.map((pr) => pr.write));
+        p = this._use(prog, [
+          ['uFlow', this.flow.read], ['uPaper', this.paperTex],
+          ...this._suspInputs(), ...this._depInputs(),
+        ]);
+        gl.uniform4fv(p.uniforms.uRho, this._pigParams.rho);
+        gl.uniform4fv(p.uniforms.uOmega, this._pigParams.omega);
+        gl.uniform4fv(p.uniforms.uGamma, this._pigParams.gamma);
+        gl.uniform1f(p.uniforms.uSettle, P.settle);
+        gl.uniform1f(p.uniforms.uLift, P.lift);
+        this._draw();
+      }
+      this.susp.forEach((pr) => pr.swap());
+      this.dep.forEach((pr) => pr.swap());
     }
   }
 
@@ -333,20 +349,30 @@ class WatercolorSim {
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     const p = this._use('render', [
       ['uFlow', this.flow.read], ['uSat', this.sat.read], ['uPaper', this.paperTex],
-      ['uSuspA', this.suspA.read], ['uSuspB', this.suspB.read],
-      ['uDepA', this.depA.read], ['uDepB', this.depB.read],
+      ...this._suspInputs(), ...this._depInputs(),
     ]);
-    if (!this._kmUploaded || this._kmProg !== p) {
-      const K = new Float32Array(24), S = new Float32Array(24);
-      PIGMENTS.forEach((pg, i) => { K.set(pg.K, i * 3); S.set(pg.S, i * 3); });
-      gl.uniform3fv(p.uniforms.uK, K);
-      gl.uniform3fv(p.uniforms.uS, S);
-      const ga = PIGMENTS.map((pg) => pg.gamma);
-      gl.uniform4f(p.uniforms.uGammaA, ga[0], ga[1], ga[2], ga[3]);
-      gl.uniform4f(p.uniforms.uGammaB, ga[4], ga[5], ga[6], ga[7]);
-      this._kmUploaded = true;
-      this._kmProg = p;
-    }
+    const n = PIG_TEXTURES * 4;
+    const K = new Float32Array(n * 3), S = new Float32Array(n * 3);
+    PIGMENTS.forEach((pg, i) => { K.set(pg.K, i * 3); S.set(pg.S, i * 3); });
+    gl.uniform3fv(p.uniforms.uK, K);
+    gl.uniform3fv(p.uniforms.uS, S);
+    this._ensurePigParams();
+    gl.uniform4fv(p.uniforms.uGamma, this._pigParams.gamma);
     this._draw();
+  }
+
+  _ensurePigParams() {
+    if (this._pigParams) return;
+    const n = PIG_TEXTURES * 4;
+    this._pigParams = {
+      rho: new Float32Array(n), omega: new Float32Array(n), gamma: new Float32Array(n),
+    };
+    // omega is a divisor: default 1 for unused channels to avoid div-by-zero
+    this._pigParams.omega.fill(1);
+    PIGMENTS.forEach((pg, i) => {
+      this._pigParams.rho[i] = pg.rho;
+      this._pigParams.omega[i] = pg.omega;
+      this._pigParams.gamma[i] = pg.gamma;
+    });
   }
 }

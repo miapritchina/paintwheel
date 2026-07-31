@@ -25,13 +25,13 @@
   const pignameEl = document.getElementById('pigname');
   let currentPig = 0;
   let mixMode = false;
-  const mixParts = new Float32Array(8);
+  const mixParts = new Float32Array(PIGMENTS.length);
 
   PIGMENTS.forEach((p, i) => {
     const b = document.createElement('button');
     b.className = 'swatch';
     b.style.background = p.swatch;
-    b.title = p.name;
+    b.title = `${p.name} (${p.ci})`;
     b.addEventListener('click', () => {
       if (mixMode) {
         mixParts[i] += 1;
@@ -147,7 +147,7 @@
   // ------------------------------------------------------------- brush ---
   // The brush carries finite water and pigment reservoirs that deplete over
   // the stroke: strokes fade and end in dry-brush texture, like a real round.
-  const pig = new Float32Array(8);
+  const pig = new Float32Array(PIGMENTS.length);
   let painting = false;
   let last = null;
   let reservoir = 1;

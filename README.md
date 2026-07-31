@@ -18,7 +18,7 @@ RGBA16F textures:
 1. **Shallow-water layer** — water depth + velocity driven by the water
    surface slope and paper relief, with viscous drag and outward drift at the
    wash boundary (the "coffee ring" effect that makes edges dry darker).
-2. **Pigment layers** — 8 real pigments tracked individually, each as
+2. **Pigment layers** — 16 real pigments tracked individually, each as
    *suspended* (moving with the water) and *deposited* (settled on the sheet)
    concentration. Deposition/lifting uses Curtis' equations with each
    pigment's measured **density**, **staining power** and **granulation**.
@@ -30,6 +30,16 @@ RGBA16F textures:
    measured K (absorption) / S (scattering) spectra from the Curtis paper.
    That's why ultramarine + hansa yellow makes green, glazes behave like
    glazes, and cadmiums cover while quinacridones stain transparently.
+
+The 16-color palette reproduces the artist's real paint wheel, pigment by
+pigment (Colour Index codes in parentheses): Cadmium Lemon (PY35), Irgazin
+Yellow (PY129), Raw Siena and Italian Burnt Siena (PBr7), Titian Red (PO36),
+Pyrrole Scarlet (PR255), Carmine (PR176), Quinacridone Pink (PR122), Potters
+Pink (PR233 — maximally granulating, non-staining), Dioxazine Purple (PV23),
+Ultramarine (PB29), Cobalt Blue (PB28), Prussian Blue (PB27), Cobalt
+Turquoise (PB36), Emerald Green (PG7-based) and Green (PG8). K/S optics are
+inverted from each paint's mass tone and undertone; density, staining and
+granulation follow the real pigment's chemistry.
 
 The paper itself is procedural: a cold-press style height field that steers
 flow, granulation, absorbency, and dry-brush texture.

@@ -1,38 +1,75 @@
 // Watercolor pigment definitions with Kubelka-Munk absorption (K) and
 // scattering (S) coefficients.
 //
-// K and S values are the MEASURED pigment data from Curtis, Anderson, Seims,
-// Fleischer & Salesin, "Computer-Generated Watercolor" (SIGGRAPH 1997),
-// Figure 5, along with their physical behavior parameters:
-//   rho   (density)     - deposition rate, how fast pigment settles out
-//   omega (staining)    - divisor on re-lifting; high omega = stains the paper
-//   gamma (granulation) - how strongly paper height modulates settling;
-//                         high gamma pigments collect in texture valleys
+// This palette reproduces the artist's real paint wheel (see repo issue
+// images): 16 single-pigment paints identified by their Colour Index codes.
+// K and S are derived from two colors per paint — its mass tone over white
+// (w) and its undertone over black (b) — using the inversion from Appendix A
+// of Curtis et al., "Computer-Generated Watercolor" (SIGGRAPH 1997):
+//   a = 0.5 * (Rw + (Rb - Rw + 1) / Rb)
+//   b = sqrt(a^2 - 1)
+//   S = (1/b) * arccoth((b^2 - (a - Rw)(a - 1)) / (b (1 - Rw)))
+//   K = S (a - 1)
+// Transparent staining paints (quinacridone, dioxazine, prussian) barely
+// lighten black; opaque ones (cadmium, cobalt turquoise) do.
 //
-// Exactly 8 pigments: the sim stores per-pigment concentration in two RGBA
-// textures (suspended) plus two (deposited); palette index maps to channel.
-// The chosen 8 form a classic split-primary palette: warm/cool blue, green,
-// yellow, warm/cool red, and two earths.
+// Behavior parameters follow real pigment chemistry:
+//   rho   (density)     - deposition rate
+//   omega (staining, >=1) - divides re-lifting; high = stains the paper
+//   gamma (granulation) - settles into paper-texture valleys
+// e.g. Potters Pink PR233 is famously granulating and non-staining, while
+// Quinacridone Pink PR122 is a transparent stainer that granulates not at all.
 
 'use strict';
 
 const PIGMENTS = (() => {
-  // name, K (rgb absorption), S (rgb scattering), rho, omega, gamma
+  const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+  const arccoth = (x) => 0.5 * Math.log((x + 1) / (x - 1));
+
+  function ksFrom(Rw, Rb) {
+    const K = [0, 0, 0], S = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      const rw = clamp(Rw[i], 0.005, 0.985);
+      const rb = clamp(Math.min(Rb[i], rw - 0.004), 0.001, 0.98);
+      const a = 0.5 * (rw + (rb - rw + 1) / rb);
+      const b = Math.sqrt(Math.max(a * a - 1, 1e-8));
+      const arg = (b * b - (a - rw) * (a - 1)) / (b * (1 - rw));
+      S[i] = Math.max(arccoth(Math.max(arg, 1 + 1e-6)) / b, 1e-4);
+      K[i] = S[i] * (a - 1);
+    }
+    return { K, S };
+  }
+
+  const hex = (h) => [
+    parseInt(h.slice(1, 3), 16) / 255,
+    parseInt(h.slice(3, 5), 16) / 255,
+    parseInt(h.slice(5, 7), 16) / 255,
+  ];
+  const lin = (c) => c.map((v) => Math.pow(v, 2.2));
+
+  // name, CI code, mass tone (over white), undertone (over black),
+  // density, staining, granulation
   const defs = [
-    { name: 'French Ultramarine', K: [0.86, 0.86, 0.06], S: [0.005, 0.005, 0.09], rho: 0.01, omega: 3.1, gamma: 0.91 },
-    { name: 'Cerulean Blue',      K: [1.52, 0.32, 0.25], S: [0.06, 0.26, 0.40],   rho: 0.01, omega: 1.0, gamma: 0.31 },
-    { name: 'Phthalo Green',      K: [1.55, 0.47, 0.63], S: [0.01, 0.05, 0.035],  rho: 0.02, omega: 1.0, gamma: 0.12 },
-    { name: 'Hansa Yellow',       K: [0.06, 0.21, 1.78], S: [0.50, 0.88, 0.009],  rho: 0.06, omega: 1.0, gamma: 0.08 },
-    { name: 'Cadmium Red',        K: [0.14, 1.08, 1.68], S: [0.77, 0.015, 0.018], rho: 0.02, omega: 1.0, gamma: 0.63 },
-    { name: 'Quinacridone Rose',  K: [0.22, 1.47, 0.57], S: [0.05, 0.003, 0.03],  rho: 0.02, omega: 5.5, gamma: 0.81 },
-    { name: 'Burnt Umber',        K: [0.74, 1.54, 2.10], S: [0.09, 0.09, 0.004],  rho: 0.09, omega: 9.3, gamma: 0.90 },
-    { name: 'Indian Red',         K: [0.46, 1.07, 1.50], S: [1.28, 0.38, 0.21],   rho: 0.05, omega: 7.0, gamma: 0.40 },
+    { name: 'Cadmium Lemon',      ci: 'PY35',  w: '#efe049', b: '#4e4a16', rho: 0.07, omega: 1.2, gamma: 0.15 },
+    { name: 'Irgazin Yellow',     ci: 'PY129', w: '#d9a916', b: '#201703', rho: 0.03, omega: 2.5, gamma: 0.10 },
+    { name: 'Raw Siena',          ci: 'PBr7',  w: '#b98a3a', b: '#271a08', rho: 0.07, omega: 1.5, gamma: 0.70 },
+    { name: 'Italian Burnt Siena',ci: 'PBr7',  w: '#b46325', b: '#1f0f05', rho: 0.06, omega: 2.0, gamma: 0.65 },
+    { name: 'Titian Red',         ci: 'PO36',  w: '#d96a2e', b: '#2a1004', rho: 0.04, omega: 2.0, gamma: 0.30 },
+    { name: 'Pyrrole Scarlet',    ci: 'PR255', w: '#d63c2a', b: '#2b0a06', rho: 0.03, omega: 4.0, gamma: 0.20 },
+    { name: 'Carmine',            ci: 'PR176', w: '#b62245', b: '#22040c', rho: 0.02, omega: 5.0, gamma: 0.10 },
+    { name: 'Quinacridone Pink',  ci: 'PR122', w: '#c93a86', b: '#1e0616', rho: 0.02, omega: 5.5, gamma: 0.08 },
+    { name: 'Potters Pink',       ci: 'PR233', w: '#c98d92', b: '#3a2426', rho: 0.08, omega: 1.0, gamma: 0.95 },
+    { name: 'Dioxazine Purple',   ci: 'PV23',  w: '#7a52b5', b: '#12081f', rho: 0.02, omega: 6.0, gamma: 0.15 },
+    { name: 'Ultramarine',        ci: 'PB29',  w: '#3b4fc0', b: '#0a0d2e', rho: 0.05, omega: 3.1, gamma: 0.91 },
+    { name: 'Cobalt Blue',        ci: 'PB28',  w: '#4a68c8', b: '#0c1233', rho: 0.06, omega: 1.3, gamma: 0.75 },
+    { name: 'Prussian Blue',      ci: 'PB27',  w: '#2e4a6b', b: '#050a12', rho: 0.02, omega: 6.5, gamma: 0.15 },
+    { name: 'Cobalt Turquoise',   ci: 'PB36',  w: '#45a8b8', b: '#0d2a2e', rho: 0.08, omega: 1.2, gamma: 0.85 },
+    { name: 'Emerald Green',      ci: 'PG7+',  w: '#46b48f', b: '#0a2419', rho: 0.04, omega: 2.0, gamma: 0.30 },
+    { name: 'Green',              ci: 'PG8',   w: '#567f36', b: '#0c1607', rho: 0.04, omega: 3.0, gamma: 0.35 },
   ];
 
-  // Compute a UI swatch color: KM reflectance of a moderately thick layer
-  // over white paper, gamma-encoded for CSS. Exposed as PIGMENTS.kmColor for
-  // the palette-mixing UI.
-  function swatchColor(K, S, x) {
+  // KM reflectance of a layer of thickness x over white, for UI swatches.
+  function kmMix(K, S, x) {
     const out = [0, 0, 0];
     for (let i = 0; i < 3; i++) {
       const s = Math.max(S[i], 1e-4);
@@ -42,28 +79,32 @@ const PIGMENTS = (() => {
       const sh = Math.sinh(c), ch = Math.cosh(c);
       const R = sh / (a * sh + b * ch);
       const T = b / (a * sh + b * ch);
-      const Rp = 0.92; // paper
+      const Rp = 0.92;
       const Rtot = R + (T * T * Rp) / (1 - R * Rp);
-      out[i] = Math.round(255 * Math.pow(Math.min(Math.max(Rtot, 0), 1), 1 / 2.2));
+      out[i] = Math.round(255 * Math.pow(clamp(Rtot, 0, 1), 1 / 2.2));
     }
     return `rgb(${out[0]},${out[1]},${out[2]})`;
   }
 
-  const list = defs.map((d) => ({
-    ...d,
-    swatch: swatchColor(d.K, d.S, 8.0),
-  }));
-  // KM color of an arbitrary mixture: parts is an array of 8 weights.
+  const list = defs.map((d) => {
+    const { K, S } = ksFrom(lin(hex(d.w)), lin(hex(d.b)));
+    return { name: d.name, ci: d.ci, K, S, rho: d.rho, omega: d.omega, gamma: d.gamma, swatch: kmMix(K, S, 8.0) };
+  });
+
+  // KM color of an arbitrary mixture: parts is an array of 16 weights.
   list.kmColor = (parts, x = 8.0) => {
     const K = [0, 0, 0], S = [0, 0, 0];
     let total = 0;
-    parts.forEach((p, i) => { total += p; });
+    parts.forEach((p) => { total += p; });
     if (total <= 0) return 'rgb(240,238,232)';
     parts.forEach((p, i) => {
       const c = p / total;
       for (let j = 0; j < 3; j++) { K[j] += c * list[i].K[j]; S[j] += c * list[i].S[j]; }
     });
-    return swatchColor(K, S, x);
+    return kmMix(K, S, x);
   };
   return list;
 })();
+
+// Number of RGBA texture pairs used to carry pigment concentrations.
+const PIG_TEXTURES = 4; // 16 pigments / 4 channels
