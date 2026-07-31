@@ -71,6 +71,15 @@ stateful — it carries water and a 16-pigment load:
 - **Paper picker**: Cold press / Hot press / Rough / Toned cream — different
   tooth, absorbency and tint (switching gives a fresh sheet).
 
+## Session logs (for feedback & bug reports)
+
+The **Log** button exports the whole session as JSON: every pan dip, water
+dip, sponge wipe, tray smear, paper change, and every brush dab with its
+exact pigment load and frame timestamp. A log fully reproduces a painting:
+paste it into the console as `REPLAY.load(sessionJson)` and the app replays
+it stroke for stroke. Sharing a log + a screenshot of the result is the best
+way to report "this didn't behave like real watercolor".
+
 ## Brush & workflow (inspired by Adobe Fresco / Art Set 4)
 
 - **Depleting reservoirs**: the brush carries finite water and pigment;

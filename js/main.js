@@ -33,6 +33,8 @@
   }
   window.sim = sim; // for console tinkering / automated tests
   window.tray = tray;
+  LOGBOOK.attach(sim, 'paper');
+  LOGBOOK.attach(tray, 'tray');
 
   const NPIG = PIGMENTS.length;
 
@@ -88,6 +90,7 @@
       const pickup = 0.2 + 0.8 * brush.water;
       brush.pig[i] = Math.min(1.2, brush.pig[i] + 0.8 * pickup);
       brush.water = Math.max(brush.water - 0.04, 0);
+      LOGBOOK.log('dipPan', { pig: i, name: p.name, water: Math.round(brush.water * 100) / 100 });
       updateBrushView(`${p.name} (${p.ci})`);
     });
     paletteEl.appendChild(b);
@@ -98,20 +101,22 @@
     // dip in clean water: full water, some pigment washes off into the glass
     brush.water = 1;
     for (let i = 0; i < NPIG; i++) brush.pig[i] *= 0.45;
+    LOGBOOK.log('glass');
     updateBrushView('Dipped in water');
   });
   document.getElementById('sponge').addEventListener('pointerdown', () => {
     brush.pig.fill(0);
     brush.water = 0.15;
+    LOGBOOK.log('sponge');
     updateBrushView('Brush wiped clean');
   });
 
   // ----------------------------------------------------------- controls ---
   const sizeEl = document.getElementById('size');
-  document.getElementById('clear').addEventListener('click', () => sim.clearAll());
+  document.getElementById('clear').addEventListener('click', () => { LOGBOOK.log('clear'); sim.clearAll(); });
   const dryBtn = document.getElementById('dry');
-  dryBtn.addEventListener('pointerdown', () => { sim.params.drySpeed = 30; });
-  const dryOff = () => { sim.params.drySpeed = 1; };
+  dryBtn.addEventListener('pointerdown', () => { sim.params.drySpeed = 30; LOGBOOK.log('drySpeed', { v: 30 }); });
+  const dryOff = () => { sim.params.drySpeed = 1; LOGBOOK.log('drySpeed', { v: 1 }); };
   dryBtn.addEventListener('pointerup', dryOff);
   dryBtn.addEventListener('pointerleave', dryOff);
   document.getElementById('demo').addEventListener('click', () => DEMO.start(sim));
@@ -126,6 +131,7 @@
   }
   paperSel.addEventListener('change', () => {
     sim.setPaper(paperSel.value);
+    LOGBOOK.log('paper', { name: paperSel.value });
     updateBrushView(`${PAPERS[paperSel.value].label} paper (fresh sheet)`);
   });
 
@@ -150,6 +156,11 @@
     tiltBtn.style.background = tiltOn ? 'rgba(120,180,255,0.35)' : '';
     if (tiltOn) window.addEventListener('deviceorientation', onOrient);
     else { window.removeEventListener('deviceorientation', onOrient); sim.params.tilt = [0, 0]; }
+  });
+
+  document.getElementById('log').addEventListener('click', () => {
+    LOGBOOK.download({ paper: paperSel.value });
+    updateBrushView('Session log exported');
   });
 
   document.getElementById('save').addEventListener('click', () => {
@@ -266,6 +277,7 @@
   let lastTap = { t: 0, x: 0, y: 0 };
   function rinseTray(msg = 'Tray rinsed') {
     tray.clearAll();
+    LOGBOOK.log('trayRinse');
     updateBrushView(msg);
   }
   document.getElementById('rinse').addEventListener('click', () => rinseTray());
@@ -309,6 +321,8 @@
 
   function frame() {
     if (!window.__PAUSED) {
+      LOGBOOK.tick();
+      REPLAY.tick();
       DEMO.tick(sim);
       sim.step();
       sim.render();
