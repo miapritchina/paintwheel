@@ -61,6 +61,32 @@
   dryBtn.addEventListener('pointerup', dryOff);
   dryBtn.addEventListener('pointerleave', dryOff);
   document.getElementById('demo').addEventListener('click', () => DEMO.start(sim));
+  // Tilt: thick wet paint runs downhill like on a tilted board.
+  // iOS requires a user-gesture permission request for orientation events.
+  const tiltBtn = document.getElementById('tilt');
+  let tiltOn = false;
+  function onOrient(e) {
+    if (!tiltOn || e.beta == null) return;
+    // gamma: left/right tilt; beta: front/back. Map to canvas UV so paint
+    // runs toward the physically lower edge of the screen (portrait).
+    const gx = Math.sin((e.gamma || 0) * Math.PI / 180);
+    const gy = Math.sin((e.beta || 0) * Math.PI / 180);
+    const k = 0.25;
+    sim.params.tilt = [gx * k, -gy * k];
+  }
+  tiltBtn.addEventListener('click', async () => {
+    if (!tiltOn && typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        if ((await DeviceOrientationEvent.requestPermission()) !== 'granted') return;
+      } catch { return; }
+    }
+    tiltOn = !tiltOn;
+    tiltBtn.style.background = tiltOn ? 'rgba(120,180,255,0.35)' : '';
+    if (tiltOn) window.addEventListener('deviceorientation', onOrient);
+    else { window.removeEventListener('deviceorientation', onOrient); sim.params.tilt = [0, 0]; }
+  });
+
   document.getElementById('save').addEventListener('click', () => {
     // render right before reading: the drawing buffer isn't preserved
     sim.render();
@@ -89,15 +115,17 @@
     const loadv = Number(loadEl.value) / 100;
     pig.fill(0);
     let water;
+    let scrub = 0;
     // wetter brushes hold more; a soaked brush outlasts several screen-widths
     const res = 0.15 + 0.85 * reservoir;
     if (currentPig < 0) {
       water = (0.01 + 0.09 * wet) * res; // plain water: wet the sheet, lift paint
+      scrub = 0.08 * pressure; // clean brush picks up pigment as it passes
     } else {
       water = (0.002 + 0.05 * wet) * res;
       pig[currentPig] = 0.10 * loadv * (0.4 + 0.6 * pressure) * res;
     }
-    sim.splat(x, y, size, water * (0.5 + 0.5 * pressure), pig, wet * res);
+    sim.splat(x, y, size, water * (0.5 + 0.5 * pressure), pig, wet * res, scrub);
   }
 
   function strokeTo(x, y, pressure) {

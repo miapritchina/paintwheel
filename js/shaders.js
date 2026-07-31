@@ -98,6 +98,7 @@ uniform vec4 uPigA;
 uniform vec4 uPigB;
 uniform float uWetness;    // 0 dry brush .. 1 flooded
 uniform float uPush;       // radial velocity impulse: a landing drop displaces water
+uniform float uScrub;      // plain-water brush picks pigment up (dirty brush)
 layout(location=0) out vec4 oFlow;
 layout(location=1) out vec4 oSuspA;
 layout(location=2) out vec4 oSuspB;
@@ -125,6 +126,9 @@ void main() {
     // outward shove where the dab lands on already-wet paper
     float rim = smoothstep(0.15, 0.85, r);
     f.yz += normalize(d + vec2(1e-6)) * (uPush * m * rim * f.w);
+    // a clean wet brush scrubs suspended pigment off the sheet
+    ga *= 1.0 - uScrub * m;
+    gb *= 1.0 - uScrub * m;
     ga += uPigA * m;
     gb += uPigB * m;
   }
@@ -145,6 +149,7 @@ uniform float uPaperSlope; // influence of paper relief on flow
 uniform float uInertia;    // memory of previous velocity (drop impulses)
 uniform float uEdgeFlow;   // outward bias at wash boundary (edge darkening)
 uniform float uMaran;      // Marangoni: paint lowers surface tension
+uniform vec2 uTilt;        // gravity from device tilt: thick wet paint runs
 uniform float uMaxSpeed;
 out vec4 frag;
 
@@ -196,6 +201,10 @@ void main() {
   vec2 gp = 0.5 * vec2(pigTotal(vUV + vec2(uTexel.x, 0.0)) - pigTotal(vUV - vec2(uTexel.x, 0.0)),
                        pigTotal(vUV + vec2(0.0, uTexel.y)) - pigTotal(vUV - vec2(0.0, uTexel.y)));
   target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.02, 0.08, h);
+
+  // device tilt: only a genuinely wet film runs (drips), damp washes hold;
+  // fiber modulation breaks the advancing front into fingers
+  target += uTilt * smoothstep(0.025, 0.1, h) * (0.7 + 0.6 * texture(uPaper, vUV).z);
 
   vec2 vel = mix(target, f.yz, uInertia);
 
@@ -421,12 +430,16 @@ void main() {
   // As the wash loses its free water, settle rate ramps up so everything in
   // suspension lands where it stands (drying), and lifting shuts off.
   float dryBoost = 1.0 + 8.0 * (1.0 - smoothstep(0.0, 0.004, h));
-  float liftGate = uLift * w * smoothstep(0.002, 0.015, h) * (0.3 + length(f.yz) * 2.0);
+  // Rewetting/lifting runs on its own resolubility timescale (independent of
+  // how fast a pigment settles): fresh water re-dissolves deposited pigment
+  // at rate ~ uLift / omega, so non-staining pigments lift visibly in a
+  // second or two while staining ones leave a permanent tint.
+  float liftGate = uLift * uDt * w * smoothstep(0.002, 0.015, h) * (0.3 + length(f.yz) * 2.0);
 
   vec4 downA = ga * clamp((vec4(1.0) - ph * uGammaA) * uRhoA * dtn * dryBoost, 0.0, 1.0) * max(w, 0.35);
   vec4 downB = gb * clamp((vec4(1.0) - ph * uGammaB) * uRhoB * dtn * dryBoost, 0.0, 1.0) * max(w, 0.35);
-  vec4 upA = da * clamp((vec4(1.0) + (ph - 1.0) * uGammaA) * uRhoA / uOmegaA * dtn * liftGate, 0.0, 1.0);
-  vec4 upB = db * clamp((vec4(1.0) + (ph - 1.0) * uGammaB) * uRhoB / uOmegaB * dtn * liftGate, 0.0, 1.0);
+  vec4 upA = da * clamp((vec4(1.0) + (ph - 1.0) * uGammaA) / uOmegaA * liftGate, 0.0, 1.0);
+  vec4 upB = db * clamp((vec4(1.0) + (ph - 1.0) * uGammaB) / uOmegaB * liftGate, 0.0, 1.0);
 
   // Curtis clamps both reservoirs to 1 (a full monolayer)
   downA = min(downA, max(vec4(1.0) - da, 0.0));
@@ -512,6 +525,19 @@ void main() {
     km(K, S + vec3(1e-5), R, T);
     Rtot = R + T * T * Rpaper / (vec3(1.0) - R * Rpaper);
   }
+
+  // dried-edge line: darken where deposited pigment changes sharply (the
+  // classic watercolor rim). Sampled at 2-texel radius so paper-grain
+  // granulation doesn't read as edges — only stroke-scale fronts do.
+  vec2 e2 = uTexel * 2.0;
+  float dC = dot(da, vec4(1.0)) + dot(db, vec4(1.0));
+  float dR = dot(texture(uDepA, vUV + vec2(e2.x, 0.0)) + texture(uDepB, vUV + vec2(e2.x, 0.0)), vec4(1.0));
+  float dL = dot(texture(uDepA, vUV - vec2(e2.x, 0.0)) + texture(uDepB, vUV - vec2(e2.x, 0.0)), vec4(1.0));
+  float dT = dot(texture(uDepA, vUV + vec2(0.0, e2.y)) + texture(uDepB, vUV + vec2(0.0, e2.y)), vec4(1.0));
+  float dB = dot(texture(uDepA, vUV - vec2(0.0, e2.y)) + texture(uDepB, vUV - vec2(0.0, e2.y)), vec4(1.0));
+  float rim = length(vec2(dR - dL, dT - dB)) * 0.5;
+  rim = clamp(rim * 0.9, 0.0, 0.30) * smoothstep(0.02, 0.3, dC);
+  Rtot *= 1.0 - rim;
 
   // wet areas look darker & glossier
   float wetvis = clamp(f.w * 0.35 + smoothstep(0.0, 0.04, f.x) * 0.55 + s.x * 0.08, 0.0, 1.0);

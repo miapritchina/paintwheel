@@ -30,6 +30,7 @@ class WatercolorSim {
       paperSlope: 0.5,  // paper relief influence on flow
       inertia: 0.8,     // velocity memory: lets drop impulses ripple outward
       maran: 1.0,       // Marangoni strength: blooms in wet washes
+      tilt: [0, 0],     // gravity vector from device tilt (uv units/step)
       edgeFlow: 0.03,   // outward drift at wash rim (contact line ~pinned)
       maxSpeed: 0.6,    // CFL guard, cells/step
       smooth: 0.04,     // height diffusion / surface tension stand-in
@@ -43,7 +44,7 @@ class WatercolorSim {
       backrun: 0.35,    // fraction of fiber capacity that re-wets a wash
       pigDiff: 0.12,    // Brownian pigment diffusion in free water
       settle: 0.08,     // global time scale on Curtis deposition rates
-      lift: 3.0,
+      lift: 0.012,      // resolubility: rewet-lift rate per step
       drySpeed: 1.0,    // user "dry fast" multiplier
     };
 
@@ -213,7 +214,7 @@ class WatercolorSim {
 
   // --------------------------------------------------------------- brush --
   // pig: Float32Array(8) of pigment amounts; water in [0..~0.1]; radius px(css)
-  splat(xCss, yCss, radiusCss, water, pig, wetness) {
+  splat(xCss, yCss, radiusCss, water, pig, wetness, scrub = 0) {
     const gl = this.gl;
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
@@ -236,6 +237,7 @@ class WatercolorSim {
     gl.uniform4f(p.uniforms.uPigB, pig[4], pig[5], pig[6], pig[7]);
     gl.uniform1f(p.uniforms.uWetness, wetness);
     gl.uniform1f(p.uniforms.uPush, Math.min(0.6, water * 8.0));
+    gl.uniform1f(p.uniforms.uScrub, scrub);
     this._draw();
     this.flow.swap();
     this.suspA.swap();
@@ -258,6 +260,7 @@ class WatercolorSim {
       gl.uniform1f(p.uniforms.uInertia, P.inertia);
       gl.uniform1f(p.uniforms.uEdgeFlow, P.edgeFlow);
       gl.uniform1f(p.uniforms.uMaran, P.maran);
+      gl.uniform2f(p.uniforms.uTilt, P.tilt[0], P.tilt[1]);
       gl.uniform1f(p.uniforms.uMaxSpeed, P.maxSpeed);
       this._draw();
       this.flow.swap();
