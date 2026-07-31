@@ -238,6 +238,28 @@ class WatercolorSim {
     }
   }
 
+  // Clear only a horizontal band (css-x range) of all state textures —
+  // used to rinse a single segment of the mixing plate.
+  clearRegion(x0Css, x1Css) {
+    const gl = this.gl;
+    const cssW = this.canvas.clientWidth || this.canvas.width;
+    const px0 = Math.max(0, Math.floor((x0Css / cssW) * this.simW));
+    const px1 = Math.min(this.simW, Math.ceil((x1Css / cssW) * this.simW));
+    if (px1 <= px0) return;
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(px0, 0, px1 - px0, this.simH);
+    const pairs = [this.flow, this.sat, ...this.susp, ...this.dep];
+    for (const pair of pairs) {
+      for (const t of [pair.read, pair.write]) {
+        this._bindOutputs([t]);
+        const pr = this._use('clear', []);
+        gl.uniform4f(pr.uniforms.uValue, 0, 0, 0, 0);
+        this._draw();
+      }
+    }
+    gl.disable(gl.SCISSOR_TEST);
+  }
+
   regenPaper(seed) {
     const gl = this.gl;
     this._bindOutputs([this.paperTex]);
@@ -421,11 +443,14 @@ class WatercolorSim {
   }
 
   _ensurePigParams() {
-    if (this._pigParams) return;
+    if (this._pigParams && this._pigVersion === PIGMENTS.version) return;
+    this._pigVersion = PIGMENTS.version;
     const n = PIG_TEXTURES * 4;
-    this._pigParams = {
+    this._pigParams = this._pigParams || {
       rho: new Float32Array(n), omega: new Float32Array(n), gamma: new Float32Array(n),
     };
+    this._pigParams.rho.fill(0);
+    this._pigParams.gamma.fill(0);
     // omega is a divisor: default 1 for unused channels to avoid div-by-zero
     this._pigParams.omega.fill(1);
     PIGMENTS.forEach((pg, i) => {

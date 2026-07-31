@@ -12,9 +12,9 @@ const DEMO = (() => {
   const W = () => window.innerWidth;
   const H = () => window.innerHeight;
   const pig = new Float32Array(PIGMENTS.length);
-  // palette indices (matches pigments.js order)
-  const ULTRAMARINE = 10, QUIN_PINK = 7, CAD_LEMON = 0, BURNT_SIENA = 3,
-        EMERALD = 14, COBALT_TURQ = 13;
+  // working-palette slot indices (matches the default palette in pigments.js)
+  const CAD_LEMON = 0, BURNT_SIENA = 2, QUIN_PINK = 3, ULTRAMARINE = 4,
+        COBALT_TURQ = 6, EMERALD = 7;
   function drop(sim, x, y, r, water, idx, amt, wetness = 1) {
     pig.fill(0);
     if (idx >= 0) pig[idx] = amt;

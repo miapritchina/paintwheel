@@ -16,7 +16,7 @@
     sim = new WatercolorSim(canvas);
     tray = new WatercolorSim(trayCanvas, {
       paper: 'ceramic',
-      maxSim: 256,
+      maxSim: 1024, // the plate is 8 segments wide; keep per-segment detail
       params: {
         evap: 0.000004,  // puddles in the tray last for ages
         edgeEvap: 4.0,
@@ -76,39 +76,61 @@
   }
 
   // ------------------------------------------------------------ palette ---
+  // Pans show the darkest possible mass tone (like real dried pans) with a
+  // short name label to tell the dark ones apart.
   const paletteEl = document.getElementById('palette');
-  const panParts = new Float32Array(NPIG);
-  PIGMENTS.forEach((p, i) => {
-    const b = document.createElement('button');
-    b.className = 'pan';
-    panParts.fill(0);
-    panParts[i] = 1;
-    b.style.background = PIGMENTS.kmColor(panParts, 4.5);
-    b.title = `${p.name} (${p.ci})`;
-    b.addEventListener('pointerdown', () => {
-      // a wetter brush picks up more paint; tap repeatedly for a creamy load
-      const pickup = 0.2 + 0.8 * brush.water;
-      brush.pig[i] = Math.min(1.2, brush.pig[i] + 0.8 * pickup);
-      brush.water = Math.max(brush.water - 0.04, 0);
-      LOGBOOK.log('dipPan', { pig: i, name: p.name, water: Math.round(brush.water * 100) / 100 });
-      updateBrushView(`${p.name} (${p.ci})`);
-    });
-    paletteEl.appendChild(b);
-  });
 
-  // ------------------------------------------------------- glass/sponge ---
+  function rebuildPans() {
+    paletteEl.innerHTML = '';
+    PIGMENTS.forEach((p, i) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'panwrap';
+      const b = document.createElement('button');
+      b.className = 'pan';
+      b.style.background = p.swatch;
+      b.title = `${p.name} (${p.ci})`;
+      b.addEventListener('pointerdown', () => {
+        // a wetter brush picks up more paint; tap repeatedly for a creamy load
+        const pickup = 0.2 + 0.8 * brush.water;
+        brush.pig[i] = Math.min(1.2, brush.pig[i] + 0.8 * pickup);
+        brush.water = Math.max(brush.water - 0.04, 0);
+        LOGBOOK.log('dipPan', { pig: i, name: p.name, water: Math.round(brush.water * 100) / 100 });
+        updateBrushView(`${p.name} (${p.ci})`);
+      });
+      const label = document.createElement('div');
+      label.className = 'panlabel';
+      label.textContent = p.short;
+      wrap.appendChild(b);
+      wrap.appendChild(label);
+      paletteEl.appendChild(wrap);
+    });
+  }
+  rebuildPans();
+  window.__refreshPalette = rebuildPans;
+
+  // ------------------------------------------- water / clean / sponge -----
   document.getElementById('glass').addEventListener('pointerdown', () => {
-    // dip in clean water: full water, some pigment washes off into the glass
-    brush.water = 1;
-    for (let i = 0; i < NPIG; i++) brush.pig[i] *= 0.45;
+    // tip dip: just the point of the brush touches the water — adds water,
+    // keeps nearly all the paint. Use 🌀 to actually rinse.
+    brush.water = Math.min(1, brush.water + 0.28);
+    for (let i = 0; i < NPIG; i++) brush.pig[i] *= 0.97;
     LOGBOOK.log('glass');
-    updateBrushView('Dipped in water');
+    updateBrushView('Tip dipped in water');
+  });
+  document.getElementById('clean').addEventListener('pointerdown', () => {
+    // swirl the brush in the jar: paint washes out, brush stays wet
+    brush.pig.fill(0);
+    brush.water = 0.8;
+    LOGBOOK.log('clean');
+    updateBrushView('Brush rinsed clean');
   });
   document.getElementById('sponge').addEventListener('pointerdown', () => {
-    brush.pig.fill(0);
-    brush.water = 0.15;
+    // blot on the sponge: sheds water, keeps most of the pigment ("thirsty
+    // brush" for controlled dry-brush and lifting)
+    brush.water *= 0.25;
+    for (let i = 0; i < NPIG; i++) brush.pig[i] *= 0.9;
     LOGBOOK.log('sponge');
-    updateBrushView('Brush wiped clean');
+    updateBrushView('Blotted on the sponge');
   });
 
   // ----------------------------------------------------------- controls ---
@@ -129,6 +151,61 @@
     o.textContent = p.label;
     paperSel.appendChild(o);
   }
+  // -------------------------------------------------------- paint box -----
+  // Choose which 8 paints from the full box occupy the working pans.
+  const boxPanel = document.getElementById('boxpanel');
+  const boxSlots = document.getElementById('boxslots');
+  const boxGrid = document.getElementById('boxgrid');
+  let selectedSlot = 0;
+
+  function rebuildBox() {
+    boxSlots.innerHTML = '';
+    PIGMENTS.forEach((p, i) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'panwrap';
+      const b = document.createElement('button');
+      b.className = 'pan' + (i === selectedSlot ? ' selected' : '');
+      b.style.background = p.swatch;
+      b.addEventListener('click', () => { selectedSlot = i; rebuildBox(); });
+      const label = document.createElement('div');
+      label.className = 'panlabel';
+      label.textContent = p.short;
+      wrap.appendChild(b); wrap.appendChild(label);
+      boxSlots.appendChild(wrap);
+    });
+    boxGrid.innerHTML = '';
+    PAINTBOX.forEach((p) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'panwrap';
+      const b = document.createElement('button');
+      const inUse = PIGMENTS.ids.includes(p.id);
+      b.className = 'pan' + (inUse ? ' inuse' : '');
+      b.style.background = p.swatch;
+      b.title = `${p.name} (${p.ci}) — tint ${p.tint}, granulation ${p.gamma}, staining ${p.omega}`;
+      b.addEventListener('click', () => {
+        const ids = PIGMENTS.ids.slice();
+        ids[selectedSlot] = p.id;
+        setActivePalette(ids);
+        LOGBOOK.log('palette', { ids });
+        rebuildBox();
+        rebuildPans();
+        updateBrushView(`${p.name} now in pan ${selectedSlot + 1}`);
+      });
+      const label = document.createElement('div');
+      label.className = 'panlabel';
+      label.textContent = p.short;
+      wrap.appendChild(b); wrap.appendChild(label);
+      boxGrid.appendChild(wrap);
+    });
+  }
+  document.getElementById('boxbtn').addEventListener('click', () => {
+    rebuildBox();
+    boxPanel.classList.add('open');
+  });
+  document.getElementById('boxclose').addEventListener('click', () => {
+    boxPanel.classList.remove('open');
+  });
+
   paperSel.addEventListener('change', () => {
     sim.setPaper(paperSel.value);
     LOGBOOK.log('paper', { name: paperSel.value });
@@ -279,12 +356,27 @@
     updateBrushView('Mixing…');
   }
 
+  // ------------------------------------------------ rotating plate --------
+  // The tray canvas is 8 segments wide; the wrap clips to one. ◀ ▶ "turn"
+  // the plate; each segment keeps its own mixes (and dries independently).
+  const SEGW = 190, NSEG = 8;
+  let seg = 0;
+  const segLabel = document.getElementById('seglabel');
+  function setSeg(n) {
+    seg = ((n % NSEG) + NSEG) % NSEG;
+    trayCanvas.style.transform = `translateX(${-seg * SEGW}px)`;
+    segLabel.textContent = `${seg + 1}/${NSEG}`;
+    LOGBOOK.log('traySeg', { seg });
+  }
+  document.getElementById('segprev').addEventListener('click', () => setSeg(seg - 1));
+  document.getElementById('segnext').addEventListener('click', () => setSeg(seg + 1));
+
   // double-tap detection by hand: dblclick doesn't fire reliably for
   // touch + pointer-capture, so track tap timing/position ourselves
   let lastTap = { t: 0, x: 0, y: 0 };
-  function rinseTray(msg = 'Tray rinsed') {
-    tray.clearAll();
-    LOGBOOK.log('trayRinse');
+  function rinseTray(msg = 'Segment rinsed') {
+    tray.clearRegion(seg * SEGW, (seg + 1) * SEGW);
+    LOGBOOK.log('trayRinse', { seg });
     updateBrushView(msg);
   }
   document.getElementById('rinse').addEventListener('click', () => rinseTray());

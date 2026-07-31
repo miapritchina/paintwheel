@@ -115,7 +115,14 @@ const REPLAY = (() => {
           for (const [k, v] of Object.entries(e.pig || {})) pig[+k] = v;
           (target.__rawSplat || target.splat)(e.x, e.y, e.r, e.w, pig, e.wet, e.scrub || 0);
         } else if (e.t === 'clear' && window.sim) sim.clearAll();
-        else if (e.t === 'trayRinse' && window.tray) tray.clearAll();
+        else if (e.t === 'palette') {
+          setActivePalette(e.ids);
+          if (window.__refreshPalette) window.__refreshPalette();
+        }
+        else if (e.t === 'trayRinse' && window.tray) {
+          if (e.seg != null) tray.clearRegion(e.seg * 190, (e.seg + 1) * 190);
+          else tray.clearAll();
+        }
         else if (e.t === 'paper' && window.sim) sim.setPaper(e.name);
         else if (e.t === 'drySpeed' && window.sim) sim.params.drySpeed = e.v;
         else if (e.t === 'tilt' && window.sim) sim.params.tilt = e.v;
