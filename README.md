@@ -44,6 +44,14 @@ the tooth). K/S optics are
 inverted from each paint's mass tone and undertone; density, staining and
 granulation follow the real pigment's chemistry.
 
+**Metallics** (Gold, Silver) are mica in gum — gouache, not watercolor — so
+they are deliberately kept *out* of the Kubelka-Munk mixture: they do not
+absorb transparently, they cover. They are accumulated separately and laid
+over the finished watercolor as an opaque layer whose sheen is a field of
+individual flake glints rather than a smooth highlight, because that is what
+mica does. Heavy, fast-settling and staying put, which is why they work for
+linework over a dry wash.
+
 The paper itself is procedural: a cold-press style height field that steers
 flow, granulation, absorbency, and dry-brush texture.
 
@@ -131,6 +139,12 @@ stateful — it carries water and a 16-pigment load:
   wash that has just lost its shine this is the classic bloom-maker: the
   drop pushes outward through the damp paint and strands it in a
   cauliflower ring.
+- **🌬 Hair dryer** — toggle, then hold on the paper. Dries *only where you
+  point it*, so you can freeze a bloom at the moment you like it, or set one
+  passage while the next stays open. Drag and the airflow blows the wet film
+  along with the nozzle — how you turn a drip into a streak or push a wash
+  into a corner. It drives water out of the sheet as well as off the
+  surface, so it genuinely sets the paper rather than skinning it.
 
 ## Settings (⚙)
 

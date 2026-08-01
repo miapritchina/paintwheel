@@ -16,6 +16,10 @@
 //   gamma  - granulation strength: settles into paper-texture valleys
 //   grain  - granulation SIZE: 0 = fine speckle following the paper tooth,
 //            1 = coarse flocs following the big grain structure
+//   metal  - 0 = ordinary transparent watercolor (Kubelka-Munk optics);
+//            >0 = metallic/mica paint, which is not transparent at all: it
+//            lies ON TOP as opaque flakes that catch the light. Rendered as
+//            a covering layer with a glint instead of an absorbing one.
 
 'use strict';
 
@@ -77,6 +81,11 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
     // granulating pigment there is — heavy, non-staining, settles into every
     // pit of the tooth as black flecks and lifts almost completely.
     { name: 'Granulating Black',   short: 'Gran. Bk', ci: 'PBk11', w: '#3a3835', b: '#090908', tint: 1.3,  rho: 0.11, omega: 1.0, gamma: 1.0,  grain: 1.0 },
+    // Metallics: mica flakes in gum, i.e. gouache, not watercolor. They
+    // cover rather than glaze, sit heavy in the water, settle fast and stay
+    // put — which is exactly why they work for linework over a dry wash.
+    { name: 'Gold',                short: 'Gold',     ci: 'mica',  w: '#c9a227', b: '#6b5210', tint: 1.0,  rho: 0.14, omega: 3.0, gamma: 0.25, grain: 0.6, metal: 1.0 },
+    { name: 'Silver',              short: 'Silver',   ci: 'mica',  w: '#c2c6cc', b: '#6e7278', tint: 1.0,  rho: 0.14, omega: 3.0, gamma: 0.25, grain: 0.6, metal: 1.0 },
   ];
 
   function kmMix(K, S, x) {
@@ -99,10 +108,16 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
   const box = defs.map((d, id) => {
     const { K, S } = ksFrom(lin(hex(d.w)), lin(hex(d.b)));
     for (let i = 0; i < 3; i++) { K[i] *= d.tint; S[i] *= d.tint; }
+    const metal = d.metal || 0;
+    const rgb = hex(d.w);
     return {
       id, name: d.name, short: d.short, ci: d.ci, K, S,
       tint: d.tint, rho: d.rho, omega: d.omega, gamma: d.gamma, grain: d.grain,
-      swatch: kmMix(K, S, 14.0), // pans show the darkest possible mass tone
+      metal,
+      mcol: lin(rgb), // the metal's own reflectance colour (linear)
+      // pans show the darkest possible mass tone; a metallic pan instead
+      // shows its own colour, since it never darkens by glazing
+      swatch: metal > 0 ? `rgb(${rgb.map((v) => Math.round(v * 255)).join(',')})` : kmMix(K, S, 14.0),
     };
   });
 
@@ -110,15 +125,28 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
   channels.version = 0;
   channels.kmColor = (parts, x = 8.0) => {
     const K = [0, 0, 0], S = [0, 0, 0];
-    let total = 0;
+    const mc = [0, 0, 0];
+    let total = 0, metal = 0;
     parts.forEach((p) => { total += p; });
     if (total <= 0) return 'rgb(240,238,232)';
     parts.forEach((p, i) => {
       if (!channels[i] || p <= 0) return;
       const c = p / total;
-      for (let j = 0; j < 3; j++) { K[j] += c * channels[i].K[j]; S[j] += c * channels[i].S[j]; }
+      const ch = channels[i];
+      for (let j = 0; j < 3; j++) { K[j] += c * ch.K[j]; S[j] += c * ch.S[j]; }
+      if (ch.metal > 0) {
+        metal += c * ch.metal;
+        for (let j = 0; j < 3; j++) mc[j] += c * ch.metal * ch.mcol[j];
+      }
     });
-    return kmMix(K, S, x);
+    const km = kmMix(K, S, x);
+    if (metal < 0.02) return km;
+    // metallics cover rather than glaze, so the brush shows metal, not the
+    // dark absorbing colour its K/S would imply
+    const base = km.match(/\d+/g).map(Number);
+    const met = mc.map((v) => Math.round(255 * Math.pow(clamp(v / metal, 0, 1), 1 / 2.2)));
+    const out = base.map((b, j) => Math.round(b * (1 - metal) + met[j] * metal));
+    return `rgb(${out[0]},${out[1]},${out[2]})`;
   };
 
   const pans = [];

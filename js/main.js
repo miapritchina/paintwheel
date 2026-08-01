@@ -425,24 +425,27 @@
   // What a touch on the paper does: paint, sprinkle salt, or drop clean
   // water. Salt and water-drop are sticky modes, so they get a dashed
   // cursor and are dismissed by touching any brush tool.
+  const MODE_BTN = { salt: 'salt', drop: 'drop', dryer: 'dryer' };
   const saltBtn = document.getElementById('salt');
-  const dropBtn = document.getElementById('drop');
   let mode = 'brush';
   const MODE_MSG = {
     brush: 'Back to the brush',
     salt: 'Salt: tap or drag over a damp wash to sprinkle',
     drop: 'Water drop: tap a wash that has lost its shine to bloom it',
+    dryer: 'Dryer: hold to dry just that spot, drag to blow the paint along',
   };
   function setMode(m, msg) {
     mode = m;
-    saltBtn.style.background = m === 'salt' ? 'rgba(255,255,255,0.4)' : '';
-    dropBtn.style.background = m === 'drop' ? 'rgba(255,255,255,0.4)' : '';
+    for (const [key, id] of Object.entries(MODE_BTN)) {
+      document.getElementById(id).style.background = m === key ? 'rgba(255,255,255,0.4)' : '';
+    }
     brushcursor.style.borderStyle = m === 'brush' ? 'solid' : 'dashed';
     if (msg === null) updateBrushView(); // keep whatever text the tool set
     else updateBrushView(msg !== undefined ? msg : MODE_MSG[m]);
   }
-  saltBtn.addEventListener('click', () => setMode(mode === 'salt' ? 'brush' : 'salt'));
-  dropBtn.addEventListener('click', () => setMode(mode === 'drop' ? 'brush' : 'drop'));
+  for (const [key, id] of Object.entries(MODE_BTN)) {
+    document.getElementById(id).addEventListener('click', () => setMode(mode === key ? 'brush' : key));
+  }
   // returning to any brush tool clearly means you're done — leaving a mode
   // on silently was swallowing paint strokes
   for (const id of ['glass', 'clean', 'sponge']) {
@@ -480,6 +483,9 @@
   let last = null;
   let salting = false;
   let saltLast = null;
+  // dryer: held position + the direction the nozzle is travelling, applied
+  // every frame for as long as the pointer is down
+  let drying_ = null;
 
   // Apple Pencil reports 0..1 force; mouse/finger report 0 or 0.5. Give the
   // pen a wider, slightly convex range so light strokes go genuinely fine
@@ -557,6 +563,10 @@
       dropAt(e.offsetX, e.offsetY);
       return;
     }
+    if (mode === 'dryer') {
+      drying_ = { x: e.offsetX, y: e.offsetY, dx: 0, dy: 0 };
+      return;
+    }
     painting = true;
     last = null;
     strokeTo(e.offsetX, e.offsetY, pressureOf(e));
@@ -568,6 +578,15 @@
     brushcursor.style.top = e.clientY + 'px';
     brushcursor.style.width = size * 2 + 'px';
     brushcursor.style.height = size * 2 + 'px';
+    if (drying_) {
+      e.preventDefault();
+      const dx = e.offsetX - drying_.x, dy = e.offsetY - drying_.y;
+      const d = Math.hypot(dx, dy);
+      // the air travels the way the nozzle is moving; a held nozzle just dries
+      if (d > 0.5) drying_ = { x: e.offsetX, y: e.offsetY, dx: dx / d, dy: dy / d };
+      else drying_ = { ...drying_, x: e.offsetX, y: e.offsetY };
+      return;
+    }
     if (salting) {
       e.preventDefault();
       const dist = saltLast ? Math.hypot(e.offsetX - saltLast.x, e.offsetY - saltLast.y) : 99;
@@ -586,7 +605,11 @@
     updateBrushView();
   });
   canvas.addEventListener('pointerleave', () => { brushcursor.style.display = 'none'; });
-  const end = () => { painting = false; last = null; salting = false; saltLast = null; updateBrushView(); };
+  const end = () => {
+    painting = false; last = null; salting = false; saltLast = null;
+    if (drying_) { LOGBOOK.log('dryerOff'); drying_ = null; }
+    updateBrushView();
+  };
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
 
@@ -838,6 +861,14 @@
       LOGBOOK.tick();
       REPLAY.tick();
       DEMO.tick(sim);
+      if (drying_) {
+        const r = Number(sizeEl.value) * 2.2 + 14;
+        sim.blowDry(drying_.x, drying_.y, r, drying_.dx, drying_.dy, 1.0);
+        LOGBOOK.log('dryer', {
+          x: Math.round(drying_.x), y: Math.round(drying_.y), r: Math.round(r),
+          dx: Math.round(drying_.dx * 100) / 100, dy: Math.round(drying_.dy * 100) / 100,
+        });
+      }
       sim.step();
       sim.render();
       tray.step();

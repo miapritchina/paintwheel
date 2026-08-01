@@ -135,6 +135,7 @@ const REPLAY = (() => {
         }
         else if (e.t === 'paper' && window.sim) sim.setPaper(e.name);
         else if (e.t === 'salt' && window.sim) sim.sprinkleSalt(e.x, e.y, e.r);
+        else if (e.t === 'dryer' && window.sim) sim.blowDry(e.x, e.y, e.r, e.dx || 0, e.dy || 0);
         // 'drop' is annotation only: dropWater goes through sim.splat, so the
         // splat event right after it already reproduces the water. Replaying
         // both would pour the drop twice.

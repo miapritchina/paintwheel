@@ -472,8 +472,16 @@ uniform vec3 uS[${NP * 4}];
 uniform vec4 uGamma[${NP}];
 uniform vec4 uGrain[${NP}];
 uniform vec3 uPaperColor;
+uniform vec4 uMetal[${NP}];        // per-channel: 0 watercolor, 1 metallic
+uniform vec3 uMetalCol[${NP * 4}]; // each metal's own reflectance colour
 uniform float uWetView; // 1 = overlay wet/satin/damp stages
 out vec4 frag;
+
+float mhash(vec2 p) {
+  p = fract(p * vec2(127.1, 311.7));
+  p += dot(p, p + 19.19);
+  return fract(p.x * p.y);
+}
 
 // Kubelka-Munk reflectance & transmittance of the pigment layer; K,S are
 // already scaled by concentration (optical depth).
@@ -505,13 +513,23 @@ ${RP.map((i) => `  {
     d${i} *= mix(vec4(1.0), vec4(0.45) + 1.2 * valley, uGamma[${i}]);
   }`).join('\n')}
 
+  // Metallic paints are split out here: mica is not a transparent absorber,
+  // so it must not enter the Kubelka-Munk mixture at all. It is accumulated
+  // separately and laid over the finished watercolor as an opaque layer.
   vec3 K = vec3(0.0), S = vec3(0.0);
   float total = 0.0;
+  float metalAmt = 0.0;
+  vec3 metalCol = vec3(0.0);
 ${RP.map((i) => `  {
     vec4 x = g${i} + d${i};
-    K += x.x * uK[${i * 4}] + x.y * uK[${i * 4 + 1}] + x.z * uK[${i * 4 + 2}] + x.w * uK[${i * 4 + 3}];
-    S += x.x * uS[${i * 4}] + x.y * uS[${i * 4 + 1}] + x.z * uS[${i * 4 + 2}] + x.w * uS[${i * 4 + 3}];
-    total += dot(x, vec4(1.0));
+    vec4 xm = x * uMetal[${i}];
+    vec4 xw = x - xm;
+    K += xw.x * uK[${i * 4}] + xw.y * uK[${i * 4 + 1}] + xw.z * uK[${i * 4 + 2}] + xw.w * uK[${i * 4 + 3}];
+    S += xw.x * uS[${i * 4}] + xw.y * uS[${i * 4 + 1}] + xw.z * uS[${i * 4 + 2}] + xw.w * uS[${i * 4 + 3}];
+    total += dot(xw, vec4(1.0));
+    metalAmt += dot(xm, vec4(1.0));
+    metalCol += xm.x * uMetalCol[${i * 4}] + xm.y * uMetalCol[${i * 4 + 1}]
+              + xm.z * uMetalCol[${i * 4 + 2}] + xm.w * uMetalCol[${i * 4 + 3}];
   }`).join('\n')}
 
   // paper: warm white, shaded by grain relief
@@ -543,6 +561,22 @@ ${RP.map((i) => `  {
   // wet areas look darker & glossier
   float wetvis = clamp(f.w * 0.35 + smoothstep(0.0, 0.04, f.x) * 0.55 + s.x * 0.08, 0.0, 1.0);
   Rtot *= mix(1.0, 0.89, wetvis);
+
+  // Metallic layer, over the top of the finished watercolor. Mica is a
+  // scatter of flat flakes, so the sheen is not a smooth highlight but a
+  // field of individual glints that catch the light where a flake happens
+  // to lie flat — hence the per-texel hash rather than a shading term.
+  if (metalAmt > 1e-4) {
+    vec3 mc = metalCol / metalAmt;
+    float cover = 1.0 - exp(-metalAmt * 5.0);
+    vec2 fp = vUV / uTexel;
+    float flake = mhash(floor(fp * 1.7));
+    float glint = pow(flake, 5.0) * (0.6 + 0.4 * max(dot(n, lightDir), 0.0));
+    // flakes settle into the tooth like any heavy pigment, so the paper
+    // relief still shows through the leaf
+    vec3 metalRGB = mc * (0.45 + 0.55 * lam) + vec3(1.0, 0.96, 0.85) * glint * 0.85;
+    Rtot = mix(Rtot, metalRGB, cover);
+  }
 
   float wx = texture(uFlow, vUV + vec2(e.x, 0.0)).x - texture(uFlow, vUV - vec2(e.x, 0.0)).x;
   float wy = texture(uFlow, vUV + vec2(0.0, e.y)).x - texture(uFlow, vUV - vec2(0.0, e.y)).x;
@@ -624,6 +658,43 @@ void main() {
     s.z = min(s.z + grain, 1.0);
   }
   frag = s;
+}`;
+
+// ---------------------------------------------------------------- dryer ----
+// Hair dryer: a local blast of moving air. Two things happen at once, and
+// both matter to how artists actually use one — it dries WHERE you point it
+// (freezing a bloom, or setting one passage while the next stays open), and
+// the airflow SHOVES the wet film along, which is how you blow a drip into
+// a streak or push a wash into a corner.
+SHADERS.dryer = `#version 300 es
+${COMMON}
+uniform sampler2D uFlow;
+uniform sampler2D uSat;
+uniform vec2 uCenter;
+uniform float uRadius;
+uniform vec2 uAspect;
+uniform vec2 uDir;      // airflow direction (nozzle -> paper)
+uniform float uPower;
+layout(location=0) out vec4 oFlow;
+layout(location=1) out vec4 oSat;
+
+void main() {
+  vec4 f = texture(uFlow, vUV);
+  vec4 s = texture(uSat, vUV);
+  vec2 d = (vUV - uCenter) * uAspect;
+  float r = length(d) / max(uRadius, 1e-5);
+  float m = 1.0 - smoothstep(0.15, 1.0, r);
+  if (m > 0.0) {
+    // evaporation under the nozzle, and the damp sheet gives up its water
+    // too — a dryer sets paper properly, it doesn't just skin the surface
+    f.x = max(f.x - uPower * uDt * 0.02 * m, 0.0);
+    s.x = max(s.x - uPower * uDt * 0.004 * m, 0.0);
+    if (f.x < 0.0004) f.w = f.w * (1.0 - m);
+    // the blast itself: only a genuinely wet film is moved by air
+    f.yz += uDir * uPower * m * 0.35 * smoothstep(0.002, 0.02, f.x);
+  }
+  oFlow = f;
+  oSat = s;
 }`;
 
 // ---------------------------------------------------------------- clear ----
