@@ -10,7 +10,9 @@ const PAPERS = {
   hotpress:  { label: 'Hot press',  grain: 0.22, tooth: 0.08, fiber: 0.05, capBase: 0.50, capVar: 0.22, color: [0.95, 0.94, 0.90], paperSlope: 0.2 },
   rough:     { label: 'Rough',      grain: 0.72, tooth: 0.55, fiber: 0.12, capBase: 0.60, capVar: 0.50, color: [0.93, 0.91, 0.85], paperSlope: 0.7 },
   toned:     { label: 'Toned cream',grain: 0.50, tooth: 0.30, fiber: 0.10, capBase: 0.55, capVar: 0.40, color: [0.90, 0.85, 0.72], paperSlope: 0.5 },
-  ceramic:   { label: 'Ceramic',    grain: 0.03, tooth: 0.0,  fiber: 0.02, capBase: 0.0,  capVar: 0.0,  color: [0.97, 0.97, 0.96], paperSlope: 0.05 },
+  // the mixing plate: no tooth, no absorbency, but a steep relief so the
+  // well rims actually contain the liquid
+  ceramic:   { label: 'Ceramic',    grain: 0.03, tooth: 0.0,  fiber: 0.02, capBase: 0.0,  capVar: 0.0,  color: [0.97, 0.97, 0.96], paperSlope: 25.0 },
 };
 
 class WatercolorSim {
@@ -19,6 +21,7 @@ class WatercolorSim {
     this.paperName = opts.paper || 'coldpress';
     this.paper = PAPERS[this.paperName];
     this.maxSim = opts.maxSim || 1024;
+    this.wells = opts.wells || 0; // dished wells across the width (palette)
     const gl = canvas.getContext('webgl2', {
       alpha: false,
       antialias: false,
@@ -71,11 +74,21 @@ class WatercolorSim {
       pigDiff: 0.12,    // Brownian pigment diffusion in free water
       settle: 0.08,     // global time scale on Curtis deposition rates
       lift: 0.012,      // resolubility: rewet-lift rate per step
-      saltPush: 3.0,    // salt starburst pigment repulsion (texels)
+      saltPush: 6.0,    // salt starburst pigment repulsion (texels)
+      saltSpacing: 9.0, // mean spacing between grains (sim texels)
+      saltGrain: 2.6,   // mean grain radius (sim texels)
+      saltDensity: 0.45,// fraction of grid cells that get a grain
       drySpeed: 1.0,    // user "dry fast" multiplier
+      flow: 1.0,        // 0 = paint and water stay put (no run-off)
     };
+    // Baselines for the run-off toggle, captured before any opts override.
+    this._flowBase = null;
     this.params.paperSlope = this.paper.paperSlope;
     Object.assign(this.params, opts.params || {});
+    this._flowBase = {};
+    for (const k of ['grav', 'maran', 'edgeFlow', 'smooth', 'pigDiff', 'wick', 'inertia']) {
+      this._flowBase[k] = this.params[k];
+    }
 
     this._initGeometry();
     this._initPrograms();
@@ -333,6 +346,7 @@ class WatercolorSim {
     gl.uniform1f(p.uniforms.uFiberAmp, this.paper.fiber);
     gl.uniform1f(p.uniforms.uCapBase, this.paper.capBase);
     gl.uniform1f(p.uniforms.uCapVar, this.paper.capVar);
+    gl.uniform1f(p.uniforms.uWells, this.wells || 0);
     this._draw();
   }
 
@@ -344,6 +358,40 @@ class WatercolorSim {
     this.params.paperSlope = this.paper.paperSlope;
     this.clearAll();
     this.regenPaper(seed != null ? seed : Math.random() * 100);
+  }
+
+  // Run-off on/off. With flow off the sheet still wets, dries, absorbs,
+  // granulates and takes backruns — but nothing travels: no downhill
+  // running, no Marangoni blooming, no wandering edges. Paint stays exactly
+  // where the brush put it, which is what you want for controlled detail.
+  setFlow(on) {
+    const b = this._flowBase;
+    this.params.flow = on ? 1 : 0;
+    this.params.grav = on ? b.grav : 0;
+    this.params.maran = on ? b.maran : 0;
+    this.params.edgeFlow = on ? b.edgeFlow : 0;
+    this.params.inertia = on ? b.inertia : 0;
+    // a little of each is kept so a wash still softens instead of looking
+    // like a hard-edged decal
+    this.params.smooth = on ? b.smooth : b.smooth * 0.15;
+    this.params.pigDiff = on ? b.pigDiff : b.pigDiff * 0.15;
+    this.params.wick = on ? b.wick : b.wick * 0.3;
+    if (!on) this.params.tilt = [0, 0];
+  }
+
+  // A drop of clean water off the end of the brush (or a dropper): lands as
+  // a deep, sharply-bounded puddle. On a wash that has lost its shine this
+  // is what makes a bloom — the drop's water pushes outward through the
+  // damp paint and strands it in a cauliflower ring.
+  dropWater(xCss, yCss, radiusCss, amount = 1.0) {
+    const empty = this._emptyPig || (this._emptyPig = new Float32Array(PIG_TEXTURES * 4));
+    this.splat(xCss, yCss, radiusCss, 0.28 * amount, empty, 1.0, 0);
+    // A backrun is not just water pushing pigment about: the drop lands on
+    // paint that has only just set and RE-DISSOLVES it, then carries it out
+    // to the drop's rim, where it strands as the cauliflower edge. Lifting
+    // is gated on free surface water, so raising it globally for a while
+    // only acts where the drop actually is.
+    this._rewet = Math.max(this._rewet || 0, 300);
   }
 
   // --------------------------------------------------------------- brush --
@@ -454,11 +502,12 @@ class WatercolorSim {
         gl.uniform4fv(p.uniforms.uGamma, this._pigParams.gamma);
         gl.uniform4fv(p.uniforms.uGrain, this._pigParams.grain);
         gl.uniform1f(p.uniforms.uSettle, P.settle);
-        gl.uniform1f(p.uniforms.uLift, P.lift);
+        gl.uniform1f(p.uniforms.uLift, P.lift * (this._rewet > 0 ? 12 : 1));
         this._draw();
       }
       this.susp.forEach((pr) => pr.swap());
       this.dep.forEach((pr) => pr.swap());
+      if (this._rewet > 0) this._rewet--;
     }
   }
 
@@ -495,7 +544,9 @@ class WatercolorSim {
     gl.uniform1f(p.uniforms.uRadius, radiusCss / cssW);
     gl.uniform2f(p.uniforms.uAspect, 1.0, cssH / cssW);
     gl.uniform1f(p.uniforms.uSeed, Math.random() * 100);
-    gl.uniform1f(p.uniforms.uDensity, 0.06);
+    gl.uniform1f(p.uniforms.uDensity, this.params.saltDensity);
+    gl.uniform1f(p.uniforms.uSpacing, this.params.saltSpacing);
+    gl.uniform1f(p.uniforms.uGrainSize, this.params.saltGrain);
     this._draw();
     this.sat.swap();
   }

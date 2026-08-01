@@ -50,7 +50,10 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
   const defs = [
     { name: 'Cadmium Lemon',       short: 'Lemon',    ci: 'PY35',  w: '#efe049', b: '#4e4a16', tint: 1.0,  rho: 0.07, omega: 1.2, gamma: 0.15, grain: 0.2 },
     { name: 'Cadmium Yellow Med.', short: 'Cad Yel',  ci: 'PY35',  w: '#f0c020', b: '#463409', tint: 1.0,  rho: 0.07, omega: 1.2, gamma: 0.20, grain: 0.25 },
-    { name: 'Irgazin Yellow',      short: 'Irgazin',  ci: 'PY129', w: '#d9a916', b: '#201703', tint: 1.5,  rho: 0.03, omega: 2.5, gamma: 0.10, grain: 0.1 },
+    // PY129 is a green-gold: Roman Szmal's Irgazin leans distinctly green,
+    // not orange. Masstone is a dark olive-gold, undertone a green-tinged
+    // shadow — that green bias is what makes it mix such clean greens.
+    { name: 'Irgazin Yellow',      short: 'Irgazin',  ci: 'PY129', w: '#c3b022', b: '#1b1c05', tint: 1.5,  rho: 0.03, omega: 2.5, gamma: 0.10, grain: 0.1 },
     { name: 'Raw Siena',           short: 'Raw Sien', ci: 'PBr7',  w: '#b98a3a', b: '#271a08', tint: 0.8,  rho: 0.07, omega: 1.5, gamma: 0.70, grain: 0.5 },
     { name: 'Italian Burnt Siena', short: 'B. Siena', ci: 'PBr7',  w: '#b46325', b: '#1f0f05', tint: 0.9,  rho: 0.06, omega: 2.0, gamma: 0.65, grain: 0.5 },
     { name: 'Titian Red',          short: 'Titian',   ci: 'PO36',  w: '#d96a2e', b: '#2a1004', tint: 1.2,  rho: 0.04, omega: 2.0, gamma: 0.30, grain: 0.3 },
@@ -70,6 +73,10 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
     { name: 'Cobalt Turquoise',    short: 'C. Turq',  ci: 'PB36',  w: '#45a8b8', b: '#0d2a2e', tint: 0.8,  rho: 0.08, omega: 1.2, gamma: 0.85, grain: 0.7 },
     { name: 'Emerald Green',       short: 'Emerald',  ci: 'PG7+',  w: '#46b48f', b: '#0a2419', tint: 2.2,  rho: 0.04, omega: 2.0, gamma: 0.30, grain: 0.25 },
     { name: 'Green',               short: 'Green',    ci: 'PG8',   w: '#567f36', b: '#0c1607', tint: 1.8,  rho: 0.04, omega: 3.0, gamma: 0.35, grain: 0.25 },
+    // PBk11 (Mars/"lunar" black): coarse magnetite, the most violently
+    // granulating pigment there is — heavy, non-staining, settles into every
+    // pit of the tooth as black flecks and lifts almost completely.
+    { name: 'Granulating Black',   short: 'Gran. Bk', ci: 'PBk11', w: '#3a3835', b: '#090908', tint: 1.3,  rho: 0.11, omega: 1.0, gamma: 1.0,  grain: 1.0 },
   ];
 
   function kmMix(K, S, x) {

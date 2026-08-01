@@ -129,11 +129,22 @@ const REPLAY = (() => {
           if (window.__refreshPalette) window.__refreshPalette();
         }
         else if (e.t === 'trayRinse' && window.tray) {
-          if (e.seg != null) tray.clearRegion(e.seg * 190, (e.seg + 1) * 190);
+          const sw = e.w || 190; // segment width varies with the layout
+          if (e.seg != null) tray.clearRegion(e.seg * sw, (e.seg + 1) * sw);
           else tray.clearAll();
         }
         else if (e.t === 'paper' && window.sim) sim.setPaper(e.name);
         else if (e.t === 'salt' && window.sim) sim.sprinkleSalt(e.x, e.y, e.r);
+        // 'drop' is annotation only: dropWater goes through sim.splat, so the
+        // splat event right after it already reproduces the water. Replaying
+        // both would pour the drop twice.
+        else if (e.t === 'settings' && window.sim) {
+          if (e.saltGrain != null) {
+            sim.params.saltGrain = e.saltGrain;
+            sim.params.saltSpacing = 4.0 + e.saltGrain * 2.4;
+          }
+          if (e.runoff != null) sim.setFlow(e.runoff);
+        }
         else if (e.t === 'drySpeed' && window.sim) sim.params.drySpeed = e.v;
         else if (e.t === 'drying' && window.sim) sim.params.dryScale = 0.25 * Math.pow(16, e.v / 100);
         else if (e.t === 'tilt' && window.sim) sim.params.tilt = e.v;

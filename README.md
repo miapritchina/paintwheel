@@ -31,13 +31,16 @@ RGBA16F textures:
    That's why ultramarine + hansa yellow makes green, glazes behave like
    glazes, and cadmiums cover while quinacridones stain transparently.
 
-The 16-color palette reproduces the artist's real paint wheel, pigment by
+The paint box reproduces the artist's real paint wheel, pigment by
 pigment (Colour Index codes in parentheses): Cadmium Lemon (PY35), Irgazin
 Yellow (PY129), Raw Siena and Italian Burnt Siena (PBr7), Titian Red (PO36),
 Pyrrole Scarlet (PR255), Carmine (PR176), Quinacridone Pink (PR122), Potters
 Pink (PR233 — maximally granulating, non-staining), Dioxazine Purple (PV23),
 Ultramarine (PB29), Cobalt Blue (PB28), Prussian Blue (PB27), Cobalt
-Turquoise (PB36), Emerald Green (PG7-based) and Green (PG8). K/S optics are
+Turquoise (PB36), Emerald Green (PG7-based), Green (PG8) and a Granulating
+Black (PBk11 — coarse magnetite, the most violently granulating pigment
+there is: heavy, non-staining, settles as black flecks into every pit of
+the tooth). K/S optics are
 inverted from each paint's mass tone and undertone; density, staining and
 granulation follow the real pigment's chemistry.
 
@@ -65,13 +68,25 @@ jobs — this is the core of the tool's feel:
 
 So all four combinations are reachable, as in life: potent-and-wet (juicy
 dark wash), potent-and-dry (drybrush), pale-and-wet (pale wash),
-pale-and-dry (faint scumble). Their ratio is shown as a consistency —
-tea / coffee / milk / cream / butter (Zbukvic's scale). Water leaves the
-brush faster than pigment, so a long stroke dries out and concentrates
-into a natural drybrush tail.
+pale-and-dry (faint scumble). Water leaves the brush faster than pigment,
+so a long stroke dries out and concentrates into a natural drybrush tail.
 
-**Drying** has its own slider (0.25×–4×): keep the sheet open for minutes
-of wet-in-wet, or push it to set in seconds.
+Three sliders sit on the brush itself, and they are the same two axes plus
+their ratio:
+
+- **🎨 Paint** — how much colour is on the hairs.
+- **💧 Water** — how much water is on the hairs.
+- **◍ Dilution** — their ratio, labelled on Zbukvic's consistency scale
+  (tea / coffee / milk / cream / butter). Dragging it thins or thickens the
+  paint *at constant water*, so you can change the colour's value without
+  changing how wet the paper will get.
+
+They double as the level meters: however you load the brush — dipping,
+swirling, painting a long stroke — they show where it stands.
+
+Loading is a **swirl, not a tap**: press on a pan (or the water, or the
+sponge) and work the brush around, and it keeps taking up more the longer
+you go. A single tap still gives one dose.
 
 ## The workbench
 
@@ -79,13 +94,24 @@ The UI mirrors a physical setup: a **palette of pans** along the bottom, a
 **ceramic mixing tray**, a **water glass** and a **sponge**. The brush is
 stateful — it carries water and a 16-pigment load:
 
-- **Dip a pan** to pick up paint (a wet brush picks up more than a dry one).
-- **Mix on the tray**: the tray is a second instance of the full watercolor
-  simulation running on non-absorbent ceramic — smear paints together,
-  dilute the puddle, and the brush picks up whatever mixture is under it.
-  Leftover paint dries in the tray and re-wets later. Double-tap to rinse.
-- **💧 Water glass**: refills the brush with water and washes some pigment off.
-- **🧽 Sponge**: wipes the brush clean and damp.
+- **Dip a pan** to pick up paint (a wet brush dissolves the pan and picks up
+  far more than a dry one, which only scuffs colour off it).
+- **Mix on the plate**: the plate is a second instance of the full watercolor
+  simulation running on non-absorbent ceramic, moulded into eight **dished
+  wells with raised rims**. The rims matter: on a flat plate, water added to
+  thin a mix simply ran away across the surface while the pigment stayed
+  put, so the mix got *stronger* the more water you added. A well holds the
+  water in with the paint.
+
+  What the brush lifts off the plate is fluid, and what counts about that
+  fluid is its **concentration** — pigment per unit water — so adding clean
+  water genuinely thins what you pick up next. Leftover paint dries in the
+  well and re-wets later. **✕** rinses the segment.
+- **💧 Water glass**: adds water to the brush and washes a little pigment off.
+  Hold and swirl for more of both.
+- **🌀 Rinse**: the brush comes out with no colour *and* no water.
+- **🧽 Sponge**: blots water off the brush while keeping most of the pigment
+  — the "thirsty brush" for dry-brush work and lifting.
 - Nothing refills mid-stroke: long strokes shed pigment first, then water,
   and end in dry-brush texture.
 - **Paper picker**: Cold press / Hot press / Rough / Toned cream — different
@@ -96,9 +122,30 @@ stateful — it carries water and a 16-pigment load:
 - **👁 Wetness view** — the digital "look for the shine": blue = wet
   (paint into it for soft blends), teal = satin (controlled soft edges),
   amber = damp (touching it blooms), untinted = dry (crisp edges, glazing).
-- **🧂 Salt** — toggle, then tap the painting. Grains soak water and shove
-  pigment into starbursts; like real salt it only textures a wash caught in
+- **🧂 Salt** — toggle, then tap or drag over the painting. Grains are a
+  scatter of individual crystals of varying size, sparse and clumpy, sized
+  from table salt to rock salt in Settings. Each one soaks water and shoves
+  pigment into a starburst; like real salt it only textures a wash caught in
   the damp band — too wet and it dissolves, too dry and nothing happens.
+- **💦 Water drop** — toggle, then tap. Drops clean water into a wash. On a
+  wash that has just lost its shine this is the classic bloom-maker: the
+  drop pushes outward through the damp paint and strands it in a
+  cauliflower ring.
+
+## Settings (⚙)
+
+- **Drying speed** — 0.25×–4×: minutes of open wet-in-wet time, or set in
+  seconds.
+- **Paint per dip** / **Water per dip** — how much one tap gives, on top of
+  swirling and the brush sliders.
+- **Salt grain size** — fine table salt through coarse rock salt (bigger
+  crystals scatter more sparsely and open larger starbursts).
+- **Paint and water run off** — off keeps the sheet wetting, drying,
+  granulating and taking backruns, but nothing travels: colour stays exactly
+  where you put it, for controlled detail work.
+- **Pencil pressure → brush size** — Apple Pencil force drives stroke width
+  (a light touch goes genuinely fine, a hard press spreads the whole belly
+  of the brush). Off: the Size slider alone decides.
 
 ## Paint box & channels
 

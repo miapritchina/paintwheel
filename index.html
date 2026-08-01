@@ -72,7 +72,7 @@
     background: #f4f4f2;
   }
   #tray {
-    width: 1520px; /* 8 segments x 190 */
+    /* width = segment width x 8, set from JS so the plate follows the layout */
     height: 84px;
     touch-action: none;
     transition: transform 0.25s ease;
@@ -114,25 +114,20 @@
     cursor: pointer;
   }
   .tool:active { background: rgba(255,255,255,0.3); }
-  /* brush tip indicator: color blob + water/paint level meters */
-  #brushwrap { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  /* brush tip indicator: colour blob + the three live brush sliders */
+  #brushwrap { display: flex; flex-direction: row; align-items: center; gap: 7px; }
   #brushview {
-    width: 34px; height: 34px;
+    width: 34px; height: 34px; flex: 0 0 auto;
     border-radius: 50% 50% 46% 46%;
     border: 2px solid rgba(255,255,255,0.35);
     background: #eee;
     box-shadow: inset 0 -5px 8px rgba(0,0,0,0.25);
   }
-  .meter {
-    width: 40px; height: 5px;
-    border-radius: 3px;
-    background: rgba(255,255,255,0.12);
-    overflow: hidden;
-  }
-  .meter > div { height: 100%; border-radius: 3px; }
-  #waterbar > div { background: #6db7e8; width: 60%; }
-  #paintbar > div { background: #c66; width: 0%; }
-  #consistency { font-size: 9px; opacity: 0.7; text-align: center; }
+  #brushsliders { display: flex; flex-direction: column; gap: 2px; }
+  .bsl { display: flex; align-items: center; gap: 4px; font-size: 11px; }
+  .bsl > span { width: 13px; text-align: center; opacity: 0.8; }
+  .bsl input[type=range] { width: 84px; }
+  #consistency { font-size: 9px; opacity: 0.7; padding-left: 17px; }
   #controls {
     display: flex;
     flex-direction: column;
@@ -194,7 +189,7 @@
   #boxpanel {
     position: absolute;
     inset: 0;
-    background: rgba(20, 18, 16, 0.94);
+    background: rgba(20, 18, 16, 0.985);
     z-index: 30;
     display: none;
     flex-direction: column;
@@ -203,7 +198,36 @@
     overflow-y: auto;
     color: var(--panel-fg);
   }
-  #boxpanel.open { display: flex; }
+  #boxpanel.open, #setpanel.open { display: flex; }
+  #setpanel {
+    position: absolute;
+    inset: 0;
+    background: rgba(20, 18, 16, 0.985);
+    z-index: 30;
+    display: none;
+    flex-direction: column;
+    gap: 14px;
+    padding: 22px 18px;
+    overflow-y: auto;
+    color: var(--panel-fg);
+    align-items: center;
+  }
+  .setrow {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; max-width: 420px;
+    font-size: 13px;
+  }
+  .setrow > span:first-child { flex: 0 0 118px; }
+  .setrow input[type=range] { flex: 1; width: auto; }
+  .setnote {
+    width: 100%; max-width: 420px;
+    font-size: 11px; opacity: 0.55; line-height: 1.4;
+    margin-top: -10px; padding-left: 128px;
+  }
+  .setrow.check { gap: 8px; }
+  .setrow.check > span:first-child { flex: 0 0 auto; }
+  .setrow input[type=checkbox] { width: 18px; height: 18px; }
+  #settitle { font-size: 15px; opacity: 0.85; }
   #boxslots {
     display: grid;
     grid-template-columns: repeat(8, 1fr);
@@ -238,6 +262,45 @@
     text-align: center;
     min-height: 13px;
   }
+  /* ---- landscape (iPad held sideways): one flat bar, maximum paper ---- */
+  @media (orientation: landscape) and (min-width: 700px) {
+    #toolbar {
+      flex-direction: row;
+      align-items: center;
+      gap: 14px;
+      padding: 6px 14px calc(6px + env(safe-area-inset-bottom));
+    }
+    #workbench { flex: 0 0 auto; }
+    #palette {
+      flex: 1 1 auto;
+      max-width: none;
+      margin: 0;
+      min-width: 280px;
+    }
+    .pan { aspect-ratio: 1.6; }
+    /* the status line sits on a tab above the bar so it stays readable
+       against the painting instead of dark-on-dark */
+    #pigname {
+      position: absolute;
+      left: 14px; top: -19px;
+      max-width: calc(100% - 28px);
+      text-align: left;
+      background: var(--panel-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      padding: 3px 9px;
+      border-radius: 7px 7px 0 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+  /* narrow phones: let the workbench wrap and shrink the plate */
+  @media (max-width: 520px) {
+    #workbench { flex-wrap: wrap; }
+    #traywrap { width: 150px; }
+    .bsl input[type=range] { width: 70px; }
+  }
   #err {
     position: absolute; inset: 0;
     display: none;
@@ -262,23 +325,29 @@
       <span id="seglabel">1/8</span>
     </div>
     <div id="tools">
-      <button id="glass" class="tool" title="Water: tap = tip dip (adds water, keeps paint). ">💧</button>
-      <button id="clean" class="tool" title="Rinse the brush clean in the jar">🌀</button>
-      <button id="sponge" class="tool" title="Sponge: blot excess water off the brush (keeps most paint)">🧽</button>
-      <div id="brushwrap" title="Brush: colour, water level (blue), paint level — their ratio is the consistency">
-        <div id="brushview"></div>
-        <div class="meter" id="waterbar"><div></div></div>
-        <div class="meter" id="paintbar"><div></div></div>
+      <button id="glass" class="tool" title="Water: tap for a tip dip, or hold and swirl to keep taking up water">💧</button>
+      <button id="clean" class="tool" title="Rinse the brush right out: no colour, no water">🌀</button>
+      <button id="sponge" class="tool" title="Sponge: blot water off the brush (keeps most paint). Hold and wipe for drier.">🧽</button>
+    </div>
+    <div id="brushwrap" title="The brush: paint on the hairs, water on the hairs, and their ratio (dilution)">
+      <div id="brushview"></div>
+      <div id="brushsliders">
+        <label class="bsl" title="How much paint is on the brush"><span>🎨</span><input id="paintload" type="range" min="0" max="100" value="0"></label>
+        <label class="bsl" title="How much water is on the brush — this alone decides how wet the paper gets"><span>💧</span><input id="waterload" type="range" min="0" max="100" value="60"></label>
+        <label class="bsl" title="Dilution: thins or thickens the paint without changing how wet the brush is"><span>◍</span><input id="dilution" type="range" min="0" max="100" value="100"></label>
         <div id="consistency">tea</div>
       </div>
     </div>
     <div id="controls">
       <div class="ctl"><span>Size</span><input id="size" type="range" min="2" max="60" value="16"></div>
-      <div class="ctl"><span>Drying</span><input id="drying" type="range" min="0" max="100" value="30" title="How fast the paper dries"></div>
       <div class="ctl"><span>Paper</span><select id="paper"></select></div>
-      <div class="btnrow"><button id="boxbtn" class="small">Paint box…</button></div>
+      <div class="btnrow">
+        <button id="boxbtn" class="small">Paint box…</button>
+        <button id="setbtn" class="small" title="Settings">⚙</button>
+      </div>
       <div class="btnrow">
         <button id="salt" class="small" title="Salt: sprinkle into a damp wash for starbursts">🧂</button>
+        <button id="drop" class="small" title="Water drop: drop clean water into a wash to bloom it">💦</button>
         <button id="wetview" class="small" title="Wetness view: see wet / satin / damp zones">👁</button>
         <button id="dry" class="small">Dry</button>
         <button id="clear" class="small">Clear</button>
@@ -299,6 +368,29 @@
   <div class="boxhint">Paint box — tap a color to put it in the selected pan:</div>
   <div id="boxgrid"></div>
   <button id="boxclose">Done</button>
+</div>
+<div id="setpanel">
+  <div id="settitle">Settings</div>
+
+  <div class="setrow"><span>Drying speed</span><input id="drying" type="range" min="0" max="100" value="30"></div>
+  <div class="setnote">How fast the sheet loses its shine. Left = minutes of open wet-in-wet time, right = sets in seconds.</div>
+
+  <div class="setrow"><span>Paint per dip</span><input id="pickup" type="range" min="5" max="100" value="50"></div>
+  <div class="setnote">How much colour one tap on a pan gives. Holding and swirling in the pan keeps loading beyond this.</div>
+
+  <div class="setrow"><span>Water per dip</span><input id="waterdip" type="range" min="5" max="100" value="50"></div>
+  <div class="setnote">How much water one tap on 💧 gives. Hold and swirl for more.</div>
+
+  <div class="setrow"><span>Salt grain size</span><input id="saltsize" type="range" min="10" max="100" value="43"></div>
+  <div class="setnote">Fine table salt through to coarse rock salt. Bigger crystals scatter more sparsely and open larger starbursts.</div>
+
+  <div class="setrow check"><input id="runoff" type="checkbox" checked><span>Paint and water run off</span></div>
+  <div class="setnote" style="padding-left:26px">On: washes spread, blooms travel, tilted paint runs downhill. Off: the sheet still wets and dries, but colour stays exactly where you put it.</div>
+
+  <div class="setrow check"><input id="presssize" type="checkbox" checked><span>Pencil pressure → brush size</span></div>
+  <div class="setnote" style="padding-left:26px">Apple Pencil force drives the width of the stroke. Off: the Size slider alone decides.</div>
+
+  <button id="setclose" style="align-self:center;padding:8px 22px;border:none;border-radius:9px;background:rgba(255,255,255,0.16);color:var(--panel-fg);font-size:14px;">Done</button>
 </div>
 <script src="js/pigments.js"></script>
 <script src="js/store.js"></script>

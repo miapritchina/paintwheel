@@ -57,6 +57,7 @@ uniform float uToothAmp;  // fine tooth
 uniform float uFiberAmp;  // directional fibers
 uniform float uCapBase;   // absorbency
 uniform float uCapVar;
+uniform float uWells;     // 0 = flat sheet; N = N dished wells across the width
 out vec4 frag;
 
 float hash(vec2 p) {
@@ -88,6 +89,18 @@ void main() {
   float flat0 = 0.5 * (1.0 - uGrainAmp - uToothAmp - uFiberAmp); // keep mean ~0.5
   float height = clamp(flat0 + uGrainAmp * grain + uToothAmp * tooth
                        + uFiberAmp * 0.5 * (fiberH + fiberV), 0.0, 1.0);
+  // A mixing palette is not a flat sheet: each segment is a dished well with
+  // a raised rim. Without the rim, water added to thin a mix simply ran out
+  // across the plate (and into the neighbouring segment) while the pigment
+  // stayed put — so the mix got MORE concentrated the more water you added.
+  // The wall holds the water in with the paint, which is what lets a puddle
+  // actually be diluted.
+  if (uWells > 0.0) {
+    float t = fract(vUV.x * uWells);
+    float rim = max(smoothstep(0.44, 0.5, abs(t - 0.5)),
+                    smoothstep(0.38, 0.5, abs(vUV.y - 0.5)));
+    height = mix(height * 0.2, 1.0, rim);
+  }
   float capacity = uCapBase + uCapVar * fbm(p * 0.02 + 91.7);
   float fibers = vnoise(p * 0.6 + 3.1);
   // w: the coarse structure alone — coarse-grained pigments (high grain
@@ -296,11 +309,14 @@ void main() {
   s.x = max(s.x - uDt * uSatEvap, 0.0);
   s.y = max(s.y, w);
 
-  // salt grains soak up nearby water and slowly dissolve while wet
+  // salt grains soak up nearby water and slowly dissolve while wet. A big
+  // crystal drinks a lot and survives long enough to keep drinking — that
+  // sustained local suction is what opens the starburst.
   if (s.z > 0.0) {
-    float soak = min(uDt * 0.0025 * s.z, h);
+    float soak = min(uDt * 0.006 * s.z, h);
     h -= soak;
-    s.z = max(s.z - uDt * 0.0012 * smoothstep(0.0005, 0.01, h + soak), 0.0);
+    s.x = min(s.x + soak * 0.5, cap * 1.2);
+    s.z = max(s.z - uDt * 0.0007 * smoothstep(0.0005, 0.01, h + soak), 0.0);
   }
 
   oFlow = vec4(h, f.yz, w);
@@ -376,7 +392,7 @@ void main() {
     vec2 e2 = uTexel * 2.0;
     vec2 gs = 0.5 * vec2(texture(uSat, vUV + vec2(e2.x, 0.0)).z - texture(uSat, vUV - vec2(e2.x, 0.0)).z,
                          texture(uSat, vUV + vec2(0.0, e2.y)).z - texture(uSat, vUV - vec2(0.0, e2.y)).z);
-    float dampBand = smoothstep(0.0005, 0.004, f.x) * (1.0 - smoothstep(0.03, 0.1, f.x));
+    float dampBand = smoothstep(0.0004, 0.003, f.x) * (1.0 - smoothstep(0.05, 0.15, f.x));
     back += gs * uSaltPush * uTexel * dampBand;
   }
 ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, back);`).join('\n')}
@@ -553,7 +569,16 @@ ${RP.map((i) => `  {
 }`;
 
 // ----------------------------------------------------------------- salt ----
-// Sprinkle salt grains into sat.z. Each grain is a sparse random cell.
+// Sprinkle real grains into sat.z.
+//
+// The first version marked every Nth cell of a fixed lattice, which gave a
+// dense, tiny, perfectly regular stipple — nothing like salt, and the
+// starburst push cancelled itself out because the salt gradient was uniform.
+// Real salt is a scatter of few, chunky, unevenly sized crystals that land
+// in clumps and gaps. So: lay a coarse spacing grid, keep only a random
+// minority of its cells, jitter each surviving grain inside its cell and
+// give it a random radius. The 3x3 neighbourhood scan lets grains from
+// adjacent cells overlap into clusters.
 SHADERS.salt = `#version 300 es
 ${COMMON}
 uniform sampler2D uSat;
@@ -561,7 +586,9 @@ uniform vec2 uCenter;
 uniform float uRadius;
 uniform vec2 uAspect;
 uniform float uSeed;
-uniform float uDensity; // fraction of cells that get a grain
+uniform float uDensity;   // fraction of grid cells that actually hold a grain
+uniform float uSpacing;   // mean grain spacing, in sim texels
+uniform float uGrainSize; // mean grain radius, in sim texels
 out vec4 frag;
 
 float hash2(vec2 p) {
@@ -575,8 +602,26 @@ void main() {
   vec2 d = (vUV - uCenter) * uAspect;
   float r = length(d) / max(uRadius, 1e-5);
   if (r < 1.0) {
-    vec2 cell = floor(vUV / uTexel / 2.0); // grains ~2 cells wide
-    if (hash2(cell) > 1.0 - uDensity) s.z = min(s.z + 0.9, 1.0);
+    vec2 px = vUV / uTexel;
+    vec2 cell = floor(px / uSpacing);
+    float grain = 0.0;
+    for (int j = -1; j <= 1; j++) {
+      for (int i = -1; i <= 1; i++) {
+        vec2 c = cell + vec2(float(i), float(j));
+        float h3 = hash2(c + vec2(11.3, 71.7));
+        // thin out toward the rim of the sprinkle so it isn't a hard disc
+        if (h3 > uDensity * (1.0 - 0.55 * r * r)) continue;
+        float h1 = hash2(c);
+        float h2 = hash2(c + vec2(37.1, 17.9));
+        vec2 gc = (c + vec2(h1, h2)) * uSpacing;
+        // crystals vary a lot in size; a few are much bigger than the rest
+        float h4 = hash2(c + vec2(5.7, 91.3));
+        float rad = uGrainSize * (0.40 + 1.3 * h4 * h4);
+        float dist = length(px - gc);
+        grain = max(grain, smoothstep(rad, rad * 0.3, dist));
+      }
+    }
+    s.z = min(s.z + grain, 1.0);
   }
   frag = s;
 }`;
