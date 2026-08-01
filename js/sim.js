@@ -50,10 +50,20 @@ class WatercolorSim {
       edgeFlow: 0.03,   // outward drift at wash rim (contact line ~pinned)
       maxSpeed: 0.6,    // CFL guard, cells/step
       smooth: 0.04,     // height diffusion / surface tension stand-in
-      evap: 0.00002,    // bulk evaporation per step: pools live ~10-20 s
+      // Drying budget, applied in PULSES (see dryPulse). The state textures
+      // are RGBA16F, so a per-substep decrement smaller than ~0.05% of the
+      // stored value rounds away to nothing — which silently froze drying
+      // entirely once the rates were slowed to a realistic pace. Applying
+      // the same total loss once every `dryPulse` substeps keeps every
+      // decrement comfortably above the precision floor.
+      dryPulse: 16,     // substeps between drying updates
+      evap: 0.0000037,  // bulk evaporation (per substep, scaled by dryPulse)
       edgeEvap: 20.0,   // extra rim evaporation multiplier (edge darkening)
-      absorb: 0.0002,   // rate of exponential approach of sat -> capacity
-      satEvap: 0.00004, // paper drying
+      absorb: 0.000012, // absorption into the sheet
+      satEvap: 0.0000015, // the damp sheet drying out: must be well under
+                          // `absorb`, or the paper can never become damp
+                          // and there is no damp stage and no backruns
+      dryScale: 1.0,    // user drying-speed control
       wetThresh: 0.0008,
       wick: 0.15,       // capillary diffusion rate
       wickThresh: 0.18,
@@ -398,10 +408,15 @@ class WatercolorSim {
       // 3. moisture: evaporation + absorption
       this._bindOutputs([this.flow.write, this.sat.write]);
       p = this._use('moisture', [['uFlow', this.flow.read], ['uSat', this.sat.read], ['uPaper', this.paperTex]]);
-      gl.uniform1f(p.uniforms.uEvap, P.evap * P.drySpeed);
+      // Pulsed drying: nothing on most substeps, then the accumulated loss
+      // in one go (see the note on dryPulse).
+      this._dryPhase = (this._dryPhase || 0) + 1;
+      const pulse = this._dryPhase % P.dryPulse === 0 ? P.dryPulse : 0;
+      const dry = P.drySpeed * P.dryScale * pulse;
+      gl.uniform1f(p.uniforms.uEvap, P.evap * dry);
       gl.uniform1f(p.uniforms.uEdgeEvap, P.edgeEvap);
-      gl.uniform1f(p.uniforms.uAbsorb, P.absorb);
-      gl.uniform1f(p.uniforms.uSatEvap, P.satEvap * P.drySpeed);
+      gl.uniform1f(p.uniforms.uAbsorb, P.absorb * dry);
+      gl.uniform1f(p.uniforms.uSatEvap, P.satEvap * dry);
       gl.uniform1f(p.uniforms.uWetThresh, P.wetThresh);
       this._draw();
       this.flow.swap();

@@ -132,6 +132,7 @@
   .meter > div { height: 100%; border-radius: 3px; }
   #waterbar > div { background: #6db7e8; width: 60%; }
   #paintbar > div { background: #c66; width: 0%; }
+  #consistency { font-size: 9px; opacity: 0.7; text-align: center; }
   #controls {
     display: flex;
     flex-direction: column;
@@ -264,14 +265,16 @@
       <button id="glass" class="tool" title="Water: tap = tip dip (adds water, keeps paint). ">💧</button>
       <button id="clean" class="tool" title="Rinse the brush clean in the jar">🌀</button>
       <button id="sponge" class="tool" title="Sponge: blot excess water off the brush (keeps most paint)">🧽</button>
-      <div id="brushwrap" title="Brush load: color, water level, paint level">
+      <div id="brushwrap" title="Brush: colour, water level (blue), paint level — their ratio is the consistency">
         <div id="brushview"></div>
         <div class="meter" id="waterbar"><div></div></div>
         <div class="meter" id="paintbar"><div></div></div>
+        <div id="consistency">tea</div>
       </div>
     </div>
     <div id="controls">
       <div class="ctl"><span>Size</span><input id="size" type="range" min="2" max="60" value="16"></div>
+      <div class="ctl"><span>Drying</span><input id="drying" type="range" min="0" max="100" value="30" title="How fast the paper dries"></div>
       <div class="ctl"><span>Paper</span><select id="paper"></select></div>
       <div class="btnrow"><button id="boxbtn" class="small">Paint box…</button></div>
       <div class="btnrow">

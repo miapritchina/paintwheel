@@ -39,16 +39,36 @@
   const NPIG = N_CHANNELS; // brush carries per-CHANNEL loads
 
   // -------------------------------------------------------------- brush ---
-  // water: 0 (bone dry) .. 1 (dripping). pig: per-pigment load on the hairs.
+  // Two INDEPENDENT quantities, exactly as on a real brush:
+  //   water  - how much fluid the hairs carry (0 bone dry .. 1 dripping).
+  //            This alone decides how wet the paper gets.
+  //   pig[]  - how much pigment sits on the hairs. This alone decides how
+  //            strong the color is.
+  // Their ratio is the paint's consistency (tea .. butter). So all four
+  // combinations are reachable: potent-and-dry (drybrush), potent-and-wet
+  // (juicy dark wash), pale-and-dry (scumble), pale-and-wet (pale wash).
   const brush = {
     water: 0.6,
     pig: new Float32Array(NPIG),
   };
   window.brush = brush;
 
+  // Zbukvic's consistency scale, from the pigment:water ratio on the hairs.
+  function consistency() {
+    const p = brushTotal();
+    const r = p / (p + 2.2 * brush.water + 1e-6);
+    if (p < 0.015) return brush.water > 0.05 ? 'clean water' : 'dry, empty';
+    if (r > 0.78) return 'butter';
+    if (r > 0.55) return 'cream';
+    if (r > 0.33) return 'milk';
+    if (r > 0.16) return 'coffee';
+    return 'tea';
+  }
+
   const brushview = document.getElementById('brushview');
   const brushcursor = document.getElementById('brushcursor');
   const pignameEl = document.getElementById('pigname');
+  const consistencyEl = document.getElementById('consistency');
 
   function brushTotal() {
     let t = 0;
@@ -72,6 +92,7 @@
     paintbar.style.width = `${Math.round(Math.min(total / 1.2, 1) * 100)}%`;
     paintbar.style.background = color;
     brushcursor.style.background = total > 0.01 ? color.replace('rgb', 'rgba').replace(')', ',0.35)') : 'rgba(200,220,255,0.2)';
+    consistencyEl.textContent = consistency();
     if (msg !== undefined) pignameEl.textContent = msg;
   }
 
@@ -137,6 +158,18 @@
 
   // ----------------------------------------------------------- controls ---
   const sizeEl = document.getElementById('size');
+
+  // Drying speed: slider 0..100 -> 0.25x .. 4x around the base rate, so the
+  // sheet can be kept open for minutes or pushed to dry in seconds.
+  const dryingEl = document.getElementById('drying');
+  function applyDrying() {
+    const t = Number(dryingEl.value) / 100;
+    sim.params.dryScale = 0.25 * Math.pow(16, t);
+    LOGBOOK.log('drying', { v: Number(dryingEl.value) });
+  }
+  dryingEl.addEventListener('input', applyDrying);
+  applyDrying();
+
   document.getElementById('clear').addEventListener('click', () => { LOGBOOK.log('clear'); sim.clearAll(); });
   const dryBtn = document.getElementById('dry');
   dryBtn.addEventListener('pointerdown', () => { sim.params.drySpeed = 30; LOGBOOK.log('drySpeed', { v: 30 }); });
@@ -242,11 +275,20 @@
   // real salt — it only textures a wash that is damp, not soaked or dry.
   const saltBtn = document.getElementById('salt');
   let saltMode = false;
-  saltBtn.addEventListener('click', () => {
-    saltMode = !saltMode;
-    saltBtn.style.background = saltMode ? 'rgba(255,255,255,0.4)' : '';
-    updateBrushView(saltMode ? 'Salt: tap the painting to sprinkle' : undefined);
-  });
+  function setSaltMode(on, msg) {
+    saltMode = on;
+    saltBtn.style.background = on ? 'rgba(255,255,255,0.4)' : '';
+    brushcursor.style.borderStyle = on ? 'dashed' : 'solid';
+    if (msg === null) updateBrushView(); // keep whatever text the tool set
+    else updateBrushView(msg !== undefined ? msg : (on ? 'Salt: tap or drag over the painting to sprinkle' : 'Salt off — back to the brush'));
+  }
+  saltBtn.addEventListener('click', () => setSaltMode(!saltMode));
+  // returning to any brush tool clearly means you're done salting —
+  // leaving the mode on silently was swallowing paint strokes
+  for (const id of ['glass', 'clean', 'sponge']) {
+    document.getElementById(id).addEventListener('pointerdown', () => { if (saltMode) setSaltMode(false, null); });
+  }
+  paletteEl.addEventListener('pointerdown', () => { if (saltMode) setSaltMode(false, null); });
 
   const wetviewBtn = document.getElementById('wetview');
   wetviewBtn.addEventListener('click', () => {
@@ -276,12 +318,17 @@
   const pigDep = new Float32Array(NPIG);
   let painting = false;
   let last = null;
+  let salting = false;
+  let saltLast = null;
 
   function dab(x, y, pressure) {
     DEMO.stop();
     const size = Number(sizeEl.value) * (0.35 + 0.65 * pressure);
     const total = brushTotal();
-    const water = (0.002 + 0.042 * brush.water) * (0.5 + 0.5 * pressure);
+    // Water delivered depends ONLY on how wet the brush is — a bone-dry
+    // brush wets the paper not at all, however much paint it carries.
+    const water = 0.055 * brush.water * (0.5 + 0.5 * pressure);
+    // Pigment delivered depends ONLY on the paint on the hairs.
     const amount = 0.4 * (0.4 + 0.6 * pressure);
     for (let i = 0; i < NPIG; i++) pigDep[i] = brush.pig[i] * amount;
     // clean damp brush lifts pigment instead of depositing
@@ -290,12 +337,12 @@
   }
 
   function deplete(dist) {
-    // pigment sheds faster than water; both persist across strokes until
-    // you dip again
-    const waterRange = 2600;
-    const pigRange = 1100;
-    brush.water *= Math.exp(-dist / waterRange);
-    for (let i = 0; i < NPIG; i++) brush.pig[i] *= Math.exp(-dist / pigRange);
+    // Water leaves faster than pigment (the paper drinks it), so a long
+    // stroke gets progressively drier and more concentrated before it
+    // finally runs out — the natural drybrush tail.
+    brush.water *= Math.exp(-dist / 900);
+    const k = Math.exp(-dist / 1600);
+    for (let i = 0; i < NPIG; i++) brush.pig[i] *= k;
   }
 
   function strokeTo(x, y, pressure) {
@@ -316,6 +363,8 @@
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
     if (saltMode) {
+      salting = true;
+      saltLast = { x: e.offsetX, y: e.offsetY };
       const r = Number(sizeEl.value) * 1.6;
       sim.sprinkleSalt(e.offsetX, e.offsetY, r);
       LOGBOOK.log('salt', { x: Math.round(e.offsetX), y: Math.round(e.offsetY), r: Math.round(r) });
@@ -332,6 +381,17 @@
     brushcursor.style.top = e.clientY + 'px';
     brushcursor.style.width = size * 2 + 'px';
     brushcursor.style.height = size * 2 + 'px';
+    if (salting) {
+      e.preventDefault();
+      const dist = saltLast ? Math.hypot(e.offsetX - saltLast.x, e.offsetY - saltLast.y) : 99;
+      if (dist > Number(sizeEl.value) * 1.2) {
+        const r = Number(sizeEl.value) * 1.6;
+        sim.sprinkleSalt(e.offsetX, e.offsetY, r);
+        LOGBOOK.log('salt', { x: Math.round(e.offsetX), y: Math.round(e.offsetY), r: Math.round(r) });
+        saltLast = { x: e.offsetX, y: e.offsetY };
+      }
+      return;
+    }
     if (!painting) return;
     e.preventDefault();
     const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
@@ -339,7 +399,7 @@
     updateBrushView();
   });
   canvas.addEventListener('pointerleave', () => { brushcursor.style.display = 'none'; });
-  const end = () => { painting = false; last = null; updateBrushView(); };
+  const end = () => { painting = false; last = null; salting = false; saltLast = null; updateBrushView(); };
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
 
@@ -350,11 +410,13 @@
   let lastPickup = 0;
 
   function trayDab(x, y) {
-    const total = brushTotal();
-    const water = 0.004 + 0.05 * brush.water;
+    // Same two-axis rule as the paper: a dry brush loaded with paint leaves
+    // thick paint on the plate and adds NO water to it.
+    const water = 0.05 * brush.water;
     for (let i = 0; i < NPIG; i++) trayPig[i] = brush.pig[i] * 0.3;
-    tray.splat(x, y, 11, water, trayPig, Math.max(brush.water, 0.3));
-    // slight shedding into the tray
+    tray.splat(x, y, 11, water, trayPig, brush.water);
+    // shedding into the tray: water goes first, as on paper
+    brush.water *= 0.99;
     for (let i = 0; i < NPIG; i++) brush.pig[i] *= 0.985;
   }
 
@@ -376,10 +438,12 @@
         brush.pig[i] = brush.pig[i] * 0.75 + Math.min(m.pig[i] * 1.2, 1) * 0.35;
       }
     }
+    // water and pigment are picked up independently: thick paint off a dry
+    // plate loads colour without wetting the brush
     if (strokeHadPuddle && m.water > 0.02) {
       brush.water = Math.min(1, Math.max(brush.water, Math.min(m.water * 4, 0.9)));
     }
-    updateBrushView('Mixing…');
+    updateBrushView(`Mixing — ${consistency()}`);
   }
 
   // ------------------------------------------------ rotating plate --------
@@ -464,6 +528,7 @@
         pans: PANS.map((p) => ({ id: p.paint.id, chan: p.chan })),
         brush: { water: brush.water, pig: Array.from(brush.pig) },
         seg,
+        drying: Number(dryingEl.value),
         painting: snap,
         tray: traySnap,
         log: LOGBOOK.export({ paper: sim.paperName }),
@@ -490,6 +555,7 @@
         brush.pig.set(st.brush.pig.slice(0, NPIG));
       }
       if (st.seg != null) setSeg(st.seg);
+      if (st.drying != null) { dryingEl.value = st.drying; applyDrying(); }
       if (st.log) LOGBOOK.restore(st.log);
       updateBrushView('Restored previous session');
     } catch (e) { /* corrupt/missing state: start fresh */ }
@@ -529,5 +595,6 @@
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-  updateBrushView('Dip a pan to load the brush; mix in the tray; 💧 dilutes, 🧽 cleans. Double-tap the tray to rinse it.');
+  window.__uv = updateBrushView; // for the console and automated tests
+  updateBrushView('Dip a pan for paint, 💧 for water — they are separate. 🌀 rinses, 🧽 blots water off.');
 })();

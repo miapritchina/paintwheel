@@ -236,9 +236,17 @@ void main() {
   float fluxB = vB > 0.0 ? fb.x * vB : f.x * vB;
   float h = f.x - uDt * (fluxR - fluxL + fluxT - fluxB);
 
-  // small diffusion mimics surface tension leveling the film
-  float avg = 0.25 * (fl.x + fr.x + fb.x + ft.x);
-  h = mix(h, avg, uSmooth * f.w);
+  // Surface tension levelling the film. Written as a PAIRWISE exchange —
+  // the coefficient min(w_a, w_b) is symmetric, so whatever one cell gives
+  // the other receives. (The earlier mix(h, avg) form was asymmetric at the
+  // wash edge: it invented water there, and a wash would reach equilibrium
+  // with evaporation and never finish drying.)
+  float lap = 0.0;
+  lap += min(f.w, fl.w) * (fl.x - f.x);
+  lap += min(f.w, fr.w) * (fr.x - f.x);
+  lap += min(f.w, fb.w) * (fb.x - f.x);
+  lap += min(f.w, ft.w) * (ft.x - f.x);
+  h += uSmooth * 0.25 * lap;
 
   frag = vec4(max(h, 0.0), f.yz, f.w);
 }`;
@@ -332,11 +340,15 @@ void main() {
   // backrun: an actively wet neighbor pushing water into a damp, drying
   // region re-wets it and releases free water that shoves pigment ahead of
   // the advancing "cauliflower" front.
+  // Mass-conserving: the damp sheet GIVES UP water to the surface, it does
+  // not invent it. (An additive term here made saturated paper a perpetual
+  // water source, so a wash could never finish drying.)
   float thresh = uBackrun * cap;
   if (s.x > thresh && f.w < 0.6 && wetNbr > 0.7) {
+    float release = min(uDt * 0.15 * (s.x - thresh) + 0.002, s.x * 0.5);
     f.w = max(f.w, 0.75);
-    f.x += uDt * 0.15 * (s.x - thresh) + 0.002;
-    s.x -= uDt * 0.12 * (s.x - thresh);
+    f.x += release;
+    s.x -= release;
   }
   oFlow = f;
   oSat = s;

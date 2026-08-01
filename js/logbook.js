@@ -135,6 +135,7 @@ const REPLAY = (() => {
         else if (e.t === 'paper' && window.sim) sim.setPaper(e.name);
         else if (e.t === 'salt' && window.sim) sim.sprinkleSalt(e.x, e.y, e.r);
         else if (e.t === 'drySpeed' && window.sim) sim.params.drySpeed = e.v;
+        else if (e.t === 'drying' && window.sim) sim.params.dryScale = 0.25 * Math.pow(16, e.v / 100);
         else if (e.t === 'tilt' && window.sim) sim.params.tilt = e.v;
       }
       f++;

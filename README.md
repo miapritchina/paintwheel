@@ -53,6 +53,26 @@ Beyond the papers, the model borrows two effects:
   draws interior fluid (and pigment) outward: the coffee-ring effect that
   dries into dark edge lines.
 
+## The brush: two independent axes
+
+Water and paint are separate quantities on the hairs, and they do separate
+jobs — this is the core of the tool's feel:
+
+- **How much water** the brush carries decides *how wet the paper gets*
+  (spread, blooming, softness). Nothing else adds water: a bone-dry brush
+  loaded with paint wets the paper not at all.
+- **How much pigment** the brush carries decides *how strong the colour is*.
+
+So all four combinations are reachable, as in life: potent-and-wet (juicy
+dark wash), potent-and-dry (drybrush), pale-and-wet (pale wash),
+pale-and-dry (faint scumble). Their ratio is shown as a consistency —
+tea / coffee / milk / cream / butter (Zbukvic's scale). Water leaves the
+brush faster than pigment, so a long stroke dries out and concentrates
+into a natural drybrush tail.
+
+**Drying** has its own slider (0.25×–4×): keep the sheet open for minutes
+of wet-in-wet, or push it to set in seconds.
+
 ## The workbench
 
 The UI mirrors a physical setup: a **palette of pans** along the bottom, a
