@@ -18,7 +18,7 @@ const PAPERS = {
 class WatercolorSim {
   constructor(canvas, opts = {}) {
     this.canvas = canvas;
-    this.paperName = opts.paper || 'coldpress';
+    this.paperName = opts.paper || 'rough';
     this.paper = PAPERS[this.paperName];
     this.maxSim = opts.maxSim || 1024;
     this.wells = opts.wells || 0; // dished wells across the width (palette)
@@ -194,6 +194,7 @@ class WatercolorSim {
       this.susp.push(this._makePair(w, h));
       this.dep.push(this._makePair(w, h));
     }
+    this.clearUndo();
     if (this.paperTex) gl.deleteTexture(this.paperTex);
     this.paperTex = this._makeTexture(w, h);
     if (!this.fbo) this.fbo = gl.createFramebuffer();
@@ -250,6 +251,82 @@ class WatercolorSim {
       this.dep[i].swap();
     }
     gl.deleteTexture(tmpTex);
+  }
+
+  // ----------------------------------------------------------------- undo --
+  // The painting is not a list of strokes, it is the state of a fluid
+  // simulation, so undo has to be a snapshot of that state. Snapshots live
+  // on the GPU: a readPixels of ten textures per stroke would stall the
+  // pipeline hard enough to be felt.
+  //
+  // Every texture is copied, not just the deposited pigment — undoing into a
+  // half-dry wash has to bring back the surface water and the pigment still
+  // in suspension, or the sheet would jump to a dried state that never
+  // existed.
+  //
+  // A snapshot is w*h*8 bytes x 10 textures, which is tens of megabytes, so
+  // the depth is whatever fits a fixed budget rather than a fixed number.
+  _statePairs() {
+    return [this.flow, this.sat, ...this.susp, ...this.dep];
+  }
+
+  get undoDepth() {
+    const bytes = this.simW * this.simH * 8 * 10;
+    return Math.max(1, Math.min(4, Math.floor(80e6 / Math.max(bytes, 1))));
+  }
+
+  get undoCount() {
+    return this._undo ? this._undo.stack.length : 0;
+  }
+
+  clearUndo() {
+    if (!this._undo) return;
+    for (const slot of [...this._undo.stack, ...this._undo.pool]) {
+      for (const t of slot) this.gl.deleteTexture(t);
+    }
+    this._undo = null;
+  }
+
+  _copyInto(src, dst) {
+    this._bindOutputs([dst]);
+    this._use('copy', [['uTex', src]]);
+    this._draw();
+  }
+
+  pushUndo() {
+    if (!this._undo || this._undo.w !== this.simW || this._undo.h !== this.simH) {
+      this.clearUndo();
+      this._undo = { stack: [], pool: [], w: this.simW, h: this.simH };
+    }
+    const u = this._undo;
+    const pairs = this._statePairs();
+    let slot = u.pool.pop();
+    if (!slot) {
+      if (u.stack.length >= this.undoDepth) slot = u.stack.shift(); // reuse oldest
+      else {
+        try {
+          slot = pairs.map(() => this._makeTexture(this.simW, this.simH));
+        } catch (e) {
+          if (!u.stack.length) return false;
+          slot = u.stack.shift(); // out of memory: settle for a shallower history
+        }
+      }
+    }
+    pairs.forEach((p, i) => this._copyInto(p.read, slot[i]));
+    u.stack.push(slot);
+    return true;
+  }
+
+  undo() {
+    const u = this._undo;
+    if (!u || !u.stack.length) return false;
+    const slot = u.stack.pop();
+    this._statePairs().forEach((p, i) => {
+      this._copyInto(slot[i], p.write);
+      p.swap();
+    });
+    u.pool.push(slot);
+    return true;
   }
 
   // ---------------------------------------------------------- pass utils --

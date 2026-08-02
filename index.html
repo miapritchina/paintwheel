@@ -63,14 +63,17 @@
   /* Everything right of the plate stacks into one plate-high column. The
      tools used to be a vertical stack, which made this row three buttons
      tall and left a large void beside the plate. */
-  #brushcol {
+  /* The pans sit beside the mixing plate: in life they are one paint box,
+     and dip-then-mix is a constant back-and-forth. */
+  #brushrow {
     display: flex;
-    flex-direction: column;
-    gap: 5px;
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: 420px;
+    align-items: center;
+    gap: 8px;
+    max-width: 460px;
+    width: 100%;
+    margin: 0 auto;
   }
+  #tools { flex: 0 0 auto; }
   /* rotating mixing plate: 8 segments, one visible; ◀ ▶ turn the plate */
   #traywrap {
     position: relative;
@@ -117,8 +120,7 @@
     gap: 5px;
   }
   .tool {
-    flex: 1 1 0;
-    min-width: 0;
+    width: 42px;
     height: 34px;
     font-size: 18px;
     background: rgba(255,255,255,0.10);
@@ -127,7 +129,7 @@
   }
   .tool:active { background: rgba(255,255,255,0.3); }
   /* brush tip indicator: colour blob + the three live brush sliders */
-  #brushwrap { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+  #brushwrap { display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
   #brushview {
     width: 30px; height: 30px; flex: 0 0 auto;
     border-radius: 50% 50% 46% 46%;
@@ -176,11 +178,15 @@
   button.small:active { background: rgba(255,255,255,0.28); }
   #palette {
     display: grid;
-    grid-template-columns: repeat(8, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 5px;
-    max-width: 460px;
-    margin: 0 auto;
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
+    align-content: center;
+  }
+  /* one row of eight once there is room for it */
+  @media (min-width: 620px) {
+    #palette { grid-template-columns: repeat(8, 1fr); }
   }
   /* the whole wrapper is the tap target, label included — that buys back
      touch area without costing the bar any height */
@@ -304,15 +310,14 @@
       gap: 14px;
       padding: 6px 14px calc(6px + env(safe-area-inset-bottom));
     }
-    #workbench { flex: 0 0 auto; }
-    #brushcol { width: 240px; }
-    #controls { width: 366px; margin: 0; flex: 0 0 auto; }
-    #palette {
-      flex: 1 1 auto;
-      max-width: none;
-      margin: 0;
-      min-width: 260px;
-    }
+    #workbench { flex: 1 1 auto; }
+    /* Two rows of four here as well. On one line the whole bar competes for
+       the same width, and eight across squeezed both the pans and the brush
+       sliders down to slivers; stacked, the pans are the plate's own height
+       and everything else gets room. */
+    #palette { grid-template-columns: repeat(4, 1fr); min-width: 200px; }
+    #brushrow { width: 340px; margin: 0; flex: 0 0 auto; }
+    #controls { width: 330px; margin: 0; flex: 0 0 auto; }
     .pan { aspect-ratio: 1.7; }
   }
   /* Phones: every row earns its height. The plate shrinks, the brush column
@@ -350,21 +355,22 @@
       <button id="segnext" class="trayctl" title="Turn plate right">▶</button>
       <span id="seglabel">1/8</span>
     </div>
-    <div id="brushcol">
-      <div id="tools">
-        <button id="glass" class="tool" title="Water: tap for a tip dip, or hold and swirl to keep taking up water">💧</button>
-        <button id="clean" class="tool" title="Rinse the brush right out: no colour, no water">🌀</button>
-        <button id="sponge" class="tool" title="Sponge: blot water off the brush (keeps most paint). Hold and wipe for drier.">🧽</button>
+    <div id="palette"></div>
+  </div>
+  <div id="brushrow">
+    <div id="tools">
+      <button id="glass" class="tool" title="Water: tap for a tip dip, or hold and swirl to keep taking up water">💧</button>
+      <button id="clean" class="tool" title="Rinse the brush right out: no colour, no water">🌀</button>
+      <button id="sponge" class="tool" title="Sponge: blot water off the brush (keeps most paint). Hold and wipe for drier.">🧽</button>
+    </div>
+    <div id="brushwrap" title="The brush: paint on the hairs, water on the hairs, and their ratio (dilution)">
+      <div id="brushview"></div>
+      <div id="brushsliders">
+        <label class="bsl" title="How much paint is on the brush"><span>🎨</span><input id="paintload" type="range" min="0" max="100" value="0"></label>
+        <label class="bsl" title="How much water is on the brush — this alone decides how wet the paper gets"><span>💧</span><input id="waterload" type="range" min="0" max="100" value="60"></label>
+        <label class="bsl" title="Dilution: thins or thickens the paint without changing how wet the brush is"><span>◍</span><input id="dilution" type="range" min="0" max="100" value="100"></label>
       </div>
-      <div id="brushwrap" title="The brush: paint on the hairs, water on the hairs, and their ratio (dilution)">
-        <div id="brushview"></div>
-        <div id="brushsliders">
-          <label class="bsl" title="How much paint is on the brush"><span>🎨</span><input id="paintload" type="range" min="0" max="100" value="0"></label>
-          <label class="bsl" title="How much water is on the brush — this alone decides how wet the paper gets"><span>💧</span><input id="waterload" type="range" min="0" max="100" value="60"></label>
-          <label class="bsl" title="Dilution: thins or thickens the paint without changing how wet the brush is"><span>◍</span><input id="dilution" type="range" min="0" max="100" value="100"></label>
-        </div>
-        <div id="consistency">tea</div>
-      </div>
+      <div id="consistency">tea</div>
     </div>
   </div>
   <div id="controls">
@@ -380,9 +386,9 @@
       <button id="dryer" class="small" title="Hair dryer: hold on the paper to dry just that spot — drag to blow the wet paint along">🌬</button>
       <button id="wetview" class="small" title="Wetness view: see wet / satin / damp zones">👁</button>
       <button id="dry" class="small" title="Flash-dry the whole sheet (hold)">Dry</button>
+      <button id="undo" class="small" title="Undo the last stroke, drop, salting or clear">↶</button>
     </div>
   </div>
-  <div id="palette"></div>
   <div id="pigname"></div>
 </div>
 <div id="boxpanel">
@@ -409,6 +415,9 @@
 
   <div class="setrow check"><input id="runoff" type="checkbox" checked><span>Paint and water run off</span></div>
   <div class="setnote" style="padding-left:26px">On: washes spread, blooms travel, tilted paint runs downhill. Off: the sheet still wets and dries, but colour stays exactly where you put it.</div>
+
+  <div class="setrow check"><input id="deplete" type="checkbox" checked><span>Brush runs out as you paint</span></div>
+  <div class="setnote" style="padding-left:26px">On: water and paint leave the hairs as you draw, so a long stroke fades and ends in dry-brush. Off: the brush holds its load, and every line comes out the same however many you draw.</div>
 
   <div class="setrow check"><input id="presssize" type="checkbox" checked><span>Pencil pressure → brush size</span></div>
   <div class="setnote" style="padding-left:26px">Apple Pencil force drives the width of the stroke. Off: the Size slider alone decides.</div>

@@ -284,6 +284,7 @@
     saltGrain: 2.6,    // salt crystal size
     runoff: true,      // paint and water travel across the sheet
     pressureSize: true,// stylus pressure drives brush size
+    deplete: true,     // the brush runs out as you paint
   };
   window.SET = SET;
 
@@ -294,6 +295,7 @@
   const saltsizeEl = document.getElementById('saltsize');
   const runoffEl = document.getElementById('runoff');
   const pressEl = document.getElementById('presssize');
+  const depleteEl = document.getElementById('deplete');
 
   // Drying speed: slider 0..100 -> 0.25x .. 4x around the base rate, so the
   // sheet can be kept open for minutes or pushed to dry in seconds.
@@ -308,6 +310,7 @@
     SET.saltGrain = Number(saltsizeEl.value) / 100 * 6.0;
     SET.runoff = runoffEl.checked;
     SET.pressureSize = pressEl.checked;
+    SET.deplete = depleteEl.checked;
     sim.params.saltGrain = SET.saltGrain;
     // sparser as the crystals get bigger, so grains never merge into a mat
     sim.params.saltSpacing = 4.0 + SET.saltGrain * 2.4;
@@ -315,7 +318,7 @@
     tray.setFlow(true); // the plate always flows: that's how mixing works
     if (log) LOGBOOK.log('settings', { ...SET });
   }
-  for (const el of [pickupEl, waterdipEl, saltsizeEl, runoffEl, pressEl]) {
+  for (const el of [pickupEl, waterdipEl, saltsizeEl, runoffEl, pressEl, depleteEl]) {
     el.addEventListener('input', () => applySettings());
   }
   dryingEl.addEventListener('input', () => applyDrying());
@@ -324,7 +327,11 @@
   applyDrying(false);
   applySettings(false);
 
-  document.getElementById('clear').addEventListener('click', () => { LOGBOOK.log('clear'); sim.clearAll(); });
+  document.getElementById('clear').addEventListener('click', () => {
+    snapshot(); // clearing the sheet is undoable too
+    LOGBOOK.log('clear');
+    sim.clearAll();
+  });
   const dryBtn = document.getElementById('dry');
   dryBtn.addEventListener('pointerdown', () => { sim.params.drySpeed = 30; LOGBOOK.log('drySpeed', { v: 30 }); });
   const dryOff = () => { sim.params.drySpeed = 1; LOGBOOK.log('drySpeed', { v: 1 }); };
@@ -340,6 +347,7 @@
     o.textContent = p.label;
     paperSel.appendChild(o);
   }
+  paperSel.value = sim.paperName;
   // -------------------------------------------------------- paint box -----
   // Choose which 8 paints from the full box occupy the working pans.
   const boxPanel = document.getElementById('boxpanel');
@@ -456,6 +464,23 @@
   }
   paletteEl.addEventListener('pointerdown', () => { if (mode !== 'brush') setMode('brush', null); });
 
+  // ---------------------------------------------------------------- undo --
+  // A snapshot is taken before anything that changes the sheet, and the log
+  // records both the snapshot and the undo so a session still replays
+  // exactly. Depth is however many snapshots fit the memory budget (see
+  // sim.undoDepth) — one or two on a big canvas, more on a phone.
+  function snapshot() {
+    if (sim.pushUndo()) LOGBOOK.log('snap');
+  }
+  document.getElementById('undo').addEventListener('click', () => {
+    if (sim.undo()) {
+      LOGBOOK.log('undo');
+      updateBrushView(`Undone — ${sim.undoCount} step${sim.undoCount === 1 ? '' : 's'} left`);
+    } else {
+      updateBrushView('Nothing left to undo');
+    }
+  });
+
   const wetviewBtn = document.getElementById('wetview');
   wetviewBtn.addEventListener('click', () => {
     sim.wetView = !sim.wetView;
@@ -522,6 +547,11 @@
   }
 
   function deplete(dist) {
+    // With depletion switched off the hairs hold their load: every line
+    // comes out the same however many you draw. Handy for flat colour and
+    // for long even lines, and the opposite of how a real brush behaves —
+    // which is exactly why it is a choice.
+    if (!SET.deplete) return;
     // Water leaves faster than pigment (the paper drinks it), so a long
     // stroke gets progressively drier and more concentrated before it
     // finally runs out — the natural drybrush tail.
@@ -556,6 +586,7 @@
     canvas.setPointerCapture(e.pointerId);
     if (mode === 'salt') {
       salting = true;
+      snapshot();
       saltLast = { x: e.offsetX, y: e.offsetY };
       const r = Number(sizeEl.value) * 1.6;
       sim.sprinkleSalt(e.offsetX, e.offsetY, r);
@@ -563,14 +594,17 @@
       return;
     }
     if (mode === 'drop') {
+      snapshot();
       dropAt(e.offsetX, e.offsetY);
       return;
     }
     if (mode === 'dryer') {
+      snapshot();
       drying_ = { x: e.offsetX, y: e.offsetY, dx: 0, dy: 0 };
       return;
     }
     painting = true;
+    snapshot();
     last = null;
     strokeTo(e.offsetX, e.offsetY, pressureOf(e));
   });
@@ -792,7 +826,7 @@
         settings: {
           pickup: Number(pickupEl.value), waterdip: Number(waterdipEl.value),
           saltsize: Number(saltsizeEl.value), runoff: runoffEl.checked,
-          presssize: pressEl.checked,
+          presssize: pressEl.checked, deplete: depleteEl.checked,
         },
         painting: snap,
         tray: traySnap,
@@ -828,6 +862,7 @@
         if (s.saltsize != null) saltsizeEl.value = s.saltsize;
         if (s.runoff != null) runoffEl.checked = s.runoff;
         if (s.presssize != null) pressEl.checked = s.presssize;
+        if (s.deplete != null) depleteEl.checked = s.deplete;
         applySettings(false);
       }
       if (st.log) LOGBOOK.restore(st.log);

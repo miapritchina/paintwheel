@@ -134,6 +134,8 @@ const REPLAY = (() => {
           else tray.clearAll();
         }
         else if (e.t === 'paper' && window.sim) sim.setPaper(e.name);
+        else if (e.t === 'snap' && window.sim) sim.pushUndo();
+        else if (e.t === 'undo' && window.sim) sim.undo();
         else if (e.t === 'salt' && window.sim) sim.sprinkleSalt(e.x, e.y, e.r);
         else if (e.t === 'dryer' && window.sim) sim.blowDry(e.x, e.y, e.r, e.dx || 0, e.dy || 0);
         // 'drop' is annotation only: dropWater goes through sim.splat, so the

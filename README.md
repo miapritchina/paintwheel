@@ -96,6 +96,12 @@ Loading is a **swirl, not a tap**: press on a pan (or the water, or the
 sponge) and work the brush around, and it keeps taking up more the longer
 you go. A single tap still gives one dose.
 
+By default the brush **runs out as you paint** — water and pigment leave the
+hairs, so a long stroke fades into a dry-brush tail. That can be switched off
+in Settings, and then the hairs hold their load: every line comes out the
+same however many you draw. It is the opposite of how a real brush behaves,
+which is exactly why it is a choice rather than the default.
+
 ## The workbench
 
 The UI mirrors a physical setup: a **palette of pans** along the bottom, a
@@ -122,8 +128,16 @@ stateful — it carries water and a 16-pigment load:
   — the "thirsty brush" for dry-brush work and lifting.
 - Nothing refills mid-stroke: long strokes shed pigment first, then water,
   and end in dry-brush texture.
-- **Paper picker**: Cold press / Hot press / Rough / Toned cream — different
-  tooth, absorbency and tint (switching gives a fresh sheet).
+- **Paper picker**: Rough (the default) / Cold press / Hot press / Toned
+  cream — different tooth, absorbency and tint (switching gives a fresh
+  sheet).
+- **↶ Undo** steps back through the last strokes, drops, saltings and
+  clears. The painting is the state of a fluid simulation rather than a list
+  of shapes, so undo works by snapshotting that whole state — water,
+  suspended pigment and deposits alike — before anything that marks the
+  sheet. Undoing into a half-dry wash therefore brings back the wetness too,
+  not just the colour. Snapshots are large, so the depth is whatever fits a
+  memory budget: two or three on a phone, one on a big canvas.
 
 ## Timing tools
 
@@ -150,8 +164,10 @@ stateful — it carries water and a 16-pigment load:
 
 The bar is built to stay out of the way — on an iPhone it takes about a
 fifth of the screen, on a landscape iPad about an eighth, and nothing wraps
-to a second line at any size. Three rows: the plate and the brush, then
-Size / Paper / Paint box / ⚙, then the pans. The status line hangs on a tab
+to a second line at any size. The pans sit **beside the mixing plate** — in life they are one paint box,
+and dip-then-mix is a constant back-and-forth — as two rows of four, which
+also keeps them a comfortable size. Then the brush row, then Size / Paper /
+Paint box / ⚙, then the tools. The status line hangs on a tab
 above the bar so it costs no height, and a pan's tap target is its whole
 cell including the name label, so the pans can stay short without becoming
 hard to hit. Occasional actions (Clear, Tilt, Demo, Save, Log, Reset) live
@@ -168,6 +184,8 @@ in ⚙ rather than taking two rows of the bar.
 - **Paint and water run off** — off keeps the sheet wetting, drying,
   granulating and taking backruns, but nothing travels: colour stays exactly
   where you put it, for controlled detail work.
+- **Brush runs out as you paint** — off keeps the brush's load constant, so
+  repeated lines come out identical.
 - **Pencil pressure → brush size** — Apple Pencil force drives stroke width
   (a light touch goes genuinely fine, a hard press spreads the whole belly
   of the brush). Off: the Size slider alone decides.
