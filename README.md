@@ -167,7 +167,12 @@ fifth of the screen, on a landscape iPad about an eighth, and nothing wraps
 to a second line at any size. Safe areas are respected: the full-screen panels start below the notch (the
 paint box's first row was hidden under the status bar), and the bar ends
 flush with the screen with just the home-indicator clearance below the last
-row. The root background is painted in the bar's colour so that, on an
+row. An installed PWA may be *letterboxed* — its web view stops short of the
+screen and iOS fills the strip below with the manifest background colour. In
+that case the OS has already moved the content clear of the home indicator,
+so padding by the inset as well stacks a second gap on the first; the app
+measures whether the view actually reaches the screen edge and only pays the
+inset when it does. The root background is painted in the bar's colour so that, on an
 installed PWA whose web view is letterboxed short of the screen, the strip
 reads as part of the bar instead of a black void. The insets are held in
 `--safe-top` / `--safe-bottom` so both layouts can be checked on a desktop

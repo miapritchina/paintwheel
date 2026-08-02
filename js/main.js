@@ -288,6 +288,37 @@
   };
   window.SET = SET;
 
+  // -------------------------------------------------- safe-area fitting ---
+  // An installed PWA can be letterboxed: the web view stops short of the
+  // screen and iOS fills the strip below it with the manifest background
+  // colour. When that happens the OS has ALREADY moved the content clear of
+  // the home indicator, so padding by env(safe-area-inset-bottom) as well
+  // stacks a second gap on the first — which is what left ~77px of dead
+  // space under the bar on an iPhone: 34px of our padding above a 43px
+  // strip. Measure whether the view actually reaches the screen edge, and
+  // only pay the inset when it does.
+  function fitSafeArea() {
+    const standalone = window.navigator.standalone === true ||
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    // iOS does not agree with itself about whether screen dimensions rotate,
+    // so pick the one that matches the current orientation rather than
+    // trusting screen.height
+    const portrait = window.innerHeight >= window.innerWidth;
+    const sw = (window.screen && screen.width) || window.innerWidth;
+    const sh = (window.screen && screen.height) || window.innerHeight;
+    const screenH = portrait ? Math.max(sw, sh) : Math.min(sw, sh);
+    const gap = Math.max(0, screenH - window.innerHeight);
+    const letterboxed = standalone && gap > 12;
+    const root = document.documentElement.style;
+    if (letterboxed) root.setProperty('--safe-bottom', '6px');
+    else root.removeProperty('--safe-bottom');
+    return { standalone, screenH, innerH: window.innerHeight, gap, letterboxed };
+  }
+  window.__fitSafeArea = fitSafeArea;
+  fitSafeArea();
+  window.addEventListener('resize', fitSafeArea);
+  window.addEventListener('orientationchange', () => setTimeout(fitSafeArea, 250));
+
   // ------------------------------------------------------------ version ---
   // Which build is actually running, and is it the one that was deployed?
   // The stamp comes from CI rather than a hand-bumped number, so it cannot
