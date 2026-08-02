@@ -208,7 +208,15 @@
       b.className = 'pan';
       b.style.background = p.swatch;
       b.title = `${p.name} (${p.ci}) — press and swirl to keep loading`;
-      swirl(b, (dose) => {
+      const label = document.createElement('div');
+      label.className = 'panlabel';
+      label.textContent = p.short;
+      wrap.appendChild(b);
+      wrap.appendChild(label);
+      // The tap target is the whole wrapper, name label included. The pans
+      // are short so the bar stays out of the way, and this buys the touch
+      // area back without costing any height.
+      swirl(wrap, (dose) => {
         // a wet brush dissolves the hard pan and picks up a lot; a dry one
         // only scuffs a little colour off it
         const chan = PANS[i].chan;
@@ -224,11 +232,6 @@
           water: Math.round(brush.water * 100) / 100,
         });
       });
-      const label = document.createElement('div');
-      label.className = 'panlabel';
-      label.textContent = p.short;
-      wrap.appendChild(b);
-      wrap.appendChild(label);
       paletteEl.appendChild(wrap);
     });
   }

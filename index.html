@@ -56,9 +56,20 @@
   }
   #workbench {
     display: flex;
-    gap: 10px;
-    align-items: stretch;
+    gap: 8px;
+    align-items: flex-start;
     justify-content: center;
+  }
+  /* Everything right of the plate stacks into one plate-high column. The
+     tools used to be a vertical stack, which made this row three buttons
+     tall and left a large void beside the plate. */
+  #brushcol {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 420px;
   }
   /* rotating mixing plate: 8 segments, one visible; ◀ ▶ turn the plate */
   #traywrap {
@@ -102,40 +113,47 @@
   }
   #tools {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
-    justify-content: center;
+    flex-direction: row;
+    gap: 5px;
   }
   .tool {
-    width: 44px; height: 38px;
-    font-size: 20px;
+    flex: 1 1 0;
+    min-width: 0;
+    height: 34px;
+    font-size: 18px;
     background: rgba(255,255,255,0.10);
-    border: none; border-radius: 9px;
+    border: none; border-radius: 8px;
     cursor: pointer;
   }
   .tool:active { background: rgba(255,255,255,0.3); }
   /* brush tip indicator: colour blob + the three live brush sliders */
-  #brushwrap { display: flex; flex-direction: row; align-items: center; gap: 7px; }
+  #brushwrap { display: flex; flex-direction: row; align-items: center; gap: 6px; }
   #brushview {
-    width: 34px; height: 34px; flex: 0 0 auto;
+    width: 30px; height: 30px; flex: 0 0 auto;
     border-radius: 50% 50% 46% 46%;
     border: 2px solid rgba(255,255,255,0.35);
     background: #eee;
     box-shadow: inset 0 -5px 8px rgba(0,0,0,0.25);
   }
-  #brushsliders { display: flex; flex-direction: column; gap: 2px; }
+  #brushsliders { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
   .bsl { display: flex; align-items: center; gap: 4px; font-size: 11px; }
-  .bsl > span { width: 13px; text-align: center; opacity: 0.8; }
-  .bsl input[type=range] { width: 84px; }
-  #consistency { font-size: 9px; opacity: 0.7; padding-left: 17px; }
+  .bsl > span { width: 13px; text-align: center; opacity: 0.8; flex: 0 0 auto; }
+  .bsl input[type=range] { flex: 1 1 auto; width: auto; min-width: 0; }
+  #consistency { font-size: 9px; opacity: 0.7; flex: 0 0 auto; width: 48px; text-align: center; }
   #controls {
     display: flex;
     flex-direction: column;
     gap: 5px;
-    justify-content: center;
     font-size: 11px;
-    min-width: 120px;
+    max-width: 460px;
+    width: 100%;
+    margin: 0 auto;
   }
+  #sizerow { display: flex; align-items: center; gap: 6px; }
+  #sizerow #size { flex: 1 1 auto; width: auto; min-width: 40px; }
+  #sizerow select { flex: 0 1 auto; min-width: 88px; }
+  #modes { justify-content: space-between; flex-wrap: nowrap; }
+  #modes .small { flex: 1 1 0; min-width: 0; text-align: center; }
   .ctl { display: flex; align-items: center; gap: 5px; }
   input[type=range] { width: 70px; }
   select {
@@ -147,6 +165,7 @@
   }
   .btnrow { display: flex; gap: 4px; flex-wrap: wrap; }
   button.small {
+    white-space: nowrap;
     background: rgba(255,255,255,0.12);
     color: var(--panel-fg);
     border: none; border-radius: 7px;
@@ -163,14 +182,17 @@
     margin: 0 auto;
     width: 100%;
   }
+  /* the whole wrapper is the tap target, label included — that buys back
+     touch area without costing the bar any height */
   .panwrap {
     display: flex;
     flex-direction: column;
     align-items: stretch;
     gap: 2px;
+    cursor: pointer;
   }
   .pan {
-    aspect-ratio: 1.35;
+    aspect-ratio: 2.0;
     border-radius: 6px;
     border: 1px solid rgba(0,0,0,0.4);
     box-shadow: inset 0 2px 5px rgba(0,0,0,0.45), inset 0 -1px 2px rgba(255,255,255,0.15);
@@ -179,7 +201,7 @@
   }
   .pan:active { transform: scale(0.93); }
   .panlabel {
-    font-size: 8px;
+    font-size: 7.5px;
     text-align: center;
     opacity: 0.75;
     white-space: nowrap;
@@ -256,11 +278,23 @@
     font-size: 14px;
     cursor: pointer;
   }
+  /* The status line sits on a tab above the bar: readable against the
+     painting, and it costs the toolbar no height. */
   #pigname {
+    position: absolute;
+    left: 10px; top: -19px;
+    max-width: calc(100% - 20px);
     font-size: 11px;
-    opacity: 0.75;
-    text-align: center;
-    min-height: 13px;
+    opacity: 0.9;
+    text-align: left;
+    background: var(--panel-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 3px 9px;
+    border-radius: 7px 7px 0 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   /* ---- landscape (iPad held sideways): one flat bar, maximum paper ---- */
   @media (orientation: landscape) and (min-width: 700px) {
@@ -271,35 +305,27 @@
       padding: 6px 14px calc(6px + env(safe-area-inset-bottom));
     }
     #workbench { flex: 0 0 auto; }
+    #brushcol { width: 240px; }
+    #controls { width: 366px; margin: 0; flex: 0 0 auto; }
     #palette {
       flex: 1 1 auto;
       max-width: none;
       margin: 0;
-      min-width: 280px;
+      min-width: 260px;
     }
-    .pan { aspect-ratio: 1.6; }
-    /* the status line sits on a tab above the bar so it stays readable
-       against the painting instead of dark-on-dark */
-    #pigname {
-      position: absolute;
-      left: 14px; top: -19px;
-      max-width: calc(100% - 28px);
-      text-align: left;
-      background: var(--panel-bg);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      padding: 3px 9px;
-      border-radius: 7px 7px 0 0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
+    .pan { aspect-ratio: 1.7; }
   }
-  /* narrow phones: let the workbench wrap and shrink the plate */
+  /* Phones: every row earns its height. The plate shrinks, the brush column
+     fills what is left, and nothing wraps to a second line. */
   @media (max-width: 520px) {
-    #workbench { flex-wrap: wrap; }
-    #traywrap { width: 150px; }
-    .bsl input[type=range] { width: 70px; }
+    #toolbar { gap: 6px; padding: 7px 8px calc(6px + env(safe-area-inset-bottom)); }
+    #traywrap { width: 132px; height: 74px; }
+    #tray { height: 74px; }
+    .tool { height: 31px; font-size: 17px; }
+    #palette { gap: 4px; }
+    .pan { aspect-ratio: 1.7; border-radius: 5px; }
+    .panlabel { font-size: 7px; }
+    button.small { padding: 4px 5px; }
   }
   #err {
     position: absolute; inset: 0;
@@ -324,40 +350,36 @@
       <button id="segnext" class="trayctl" title="Turn plate right">▶</button>
       <span id="seglabel">1/8</span>
     </div>
-    <div id="tools">
-      <button id="glass" class="tool" title="Water: tap for a tip dip, or hold and swirl to keep taking up water">💧</button>
-      <button id="clean" class="tool" title="Rinse the brush right out: no colour, no water">🌀</button>
-      <button id="sponge" class="tool" title="Sponge: blot water off the brush (keeps most paint). Hold and wipe for drier.">🧽</button>
-    </div>
-    <div id="brushwrap" title="The brush: paint on the hairs, water on the hairs, and their ratio (dilution)">
-      <div id="brushview"></div>
-      <div id="brushsliders">
-        <label class="bsl" title="How much paint is on the brush"><span>🎨</span><input id="paintload" type="range" min="0" max="100" value="0"></label>
-        <label class="bsl" title="How much water is on the brush — this alone decides how wet the paper gets"><span>💧</span><input id="waterload" type="range" min="0" max="100" value="60"></label>
-        <label class="bsl" title="Dilution: thins or thickens the paint without changing how wet the brush is"><span>◍</span><input id="dilution" type="range" min="0" max="100" value="100"></label>
+    <div id="brushcol">
+      <div id="tools">
+        <button id="glass" class="tool" title="Water: tap for a tip dip, or hold and swirl to keep taking up water">💧</button>
+        <button id="clean" class="tool" title="Rinse the brush right out: no colour, no water">🌀</button>
+        <button id="sponge" class="tool" title="Sponge: blot water off the brush (keeps most paint). Hold and wipe for drier.">🧽</button>
+      </div>
+      <div id="brushwrap" title="The brush: paint on the hairs, water on the hairs, and their ratio (dilution)">
+        <div id="brushview"></div>
+        <div id="brushsliders">
+          <label class="bsl" title="How much paint is on the brush"><span>🎨</span><input id="paintload" type="range" min="0" max="100" value="0"></label>
+          <label class="bsl" title="How much water is on the brush — this alone decides how wet the paper gets"><span>💧</span><input id="waterload" type="range" min="0" max="100" value="60"></label>
+          <label class="bsl" title="Dilution: thins or thickens the paint without changing how wet the brush is"><span>◍</span><input id="dilution" type="range" min="0" max="100" value="100"></label>
+        </div>
         <div id="consistency">tea</div>
       </div>
     </div>
-    <div id="controls">
-      <div class="ctl"><span>Size</span><input id="size" type="range" min="2" max="60" value="16"></div>
-      <div class="ctl"><span>Paper</span><select id="paper"></select></div>
-      <div class="btnrow">
-        <button id="boxbtn" class="small">Paint box…</button>
-        <button id="setbtn" class="small" title="Settings">⚙</button>
-      </div>
-      <div class="btnrow">
-        <button id="salt" class="small" title="Salt: sprinkle into a damp wash for starbursts">🧂</button>
-        <button id="drop" class="small" title="Water drop: drop clean water into a wash to bloom it">💦</button>
-        <button id="dryer" class="small" title="Hair dryer: hold on the paper to dry just that spot — drag to blow the wet paint along">🌬</button>
-        <button id="wetview" class="small" title="Wetness view: see wet / satin / damp zones">👁</button>
-        <button id="dry" class="small">Dry</button>
-        <button id="clear" class="small">Clear</button>
-        <button id="demo" class="small">Demo</button>
-        <button id="tilt" class="small">Tilt</button>
-        <button id="save" class="small">Save</button>
-        <button id="log" class="small" title="Export this session's strokes as JSON">Log</button>
-        <button id="reset" class="small" title="Clear painting, tray, palette and saved state">Reset</button>
-      </div>
+  </div>
+  <div id="controls">
+    <div id="sizerow">
+      <span>Size</span><input id="size" type="range" min="2" max="60" value="16">
+      <select id="paper" title="Paper"></select>
+      <button id="boxbtn" class="small">Paint box…</button>
+      <button id="setbtn" class="small" title="Settings &amp; more">⚙</button>
+    </div>
+    <div class="btnrow" id="modes">
+      <button id="salt" class="small" title="Salt: sprinkle into a damp wash for starbursts">🧂</button>
+      <button id="drop" class="small" title="Water drop: drop clean water into a wash to bloom it">💦</button>
+      <button id="dryer" class="small" title="Hair dryer: hold on the paper to dry just that spot — drag to blow the wet paint along">🌬</button>
+      <button id="wetview" class="small" title="Wetness view: see wet / satin / damp zones">👁</button>
+      <button id="dry" class="small" title="Flash-dry the whole sheet (hold)">Dry</button>
     </div>
   </div>
   <div id="palette"></div>
@@ -390,6 +412,16 @@
 
   <div class="setrow check"><input id="presssize" type="checkbox" checked><span>Pencil pressure → brush size</span></div>
   <div class="setnote" style="padding-left:26px">Apple Pencil force drives the width of the stroke. Off: the Size slider alone decides.</div>
+
+  <div id="settitle" style="margin-top:6px">The sheet</div>
+  <div class="btnrow" style="max-width:420px;justify-content:center">
+    <button id="clear" class="small">Clear</button>
+    <button id="tilt" class="small" title="Tilt the device and thick wet paint runs downhill">Tilt</button>
+    <button id="demo" class="small">Demo</button>
+    <button id="save" class="small" title="Export the painting as a PNG">Save</button>
+    <button id="log" class="small" title="Export this session's strokes as JSON">Log</button>
+    <button id="reset" class="small" title="Clear painting, tray, palette and saved state">Reset</button>
+  </div>
 
   <button id="setclose" style="align-self:center;padding:8px 22px;border:none;border-radius:9px;background:rgba(255,255,255,0.16);color:var(--panel-fg);font-size:14px;">Done</button>
 </div>

@@ -146,6 +146,17 @@ stateful — it carries water and a 16-pigment load:
   into a corner. It drives water out of the sheet as well as off the
   surface, so it genuinely sets the paper rather than skinning it.
 
+## Layout
+
+The bar is built to stay out of the way — on an iPhone it takes about a
+fifth of the screen, on a landscape iPad about an eighth, and nothing wraps
+to a second line at any size. Three rows: the plate and the brush, then
+Size / Paper / Paint box / ⚙, then the pans. The status line hangs on a tab
+above the bar so it costs no height, and a pan's tap target is its whole
+cell including the name label, so the pans can stay short without becoming
+hard to hit. Occasional actions (Clear, Tilt, Demo, Save, Log, Reset) live
+in ⚙ rather than taking two rows of the bar.
+
 ## Settings (⚙)
 
 - **Drying speed** — 0.25×–4×: minutes of open wet-in-wet time, or set in
