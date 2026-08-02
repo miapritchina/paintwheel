@@ -14,8 +14,16 @@
   :root {
     --panel-bg: rgba(32, 30, 27, 0.88);
     --panel-fg: #f0ece6;
+    /* Held as variables so they can be overridden to check the notch and
+       home-indicator layouts on a desktop browser, where env() is all 0. */
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  /* The home-indicator strip below the layout viewport is painted with the
+     root background, so give it the bar's colour: it read as a black void
+     under the toolbar otherwise. */
+  html { background: #35322f; }
   html, body {
     width: 100%; height: 100%;
     overflow: hidden;
@@ -23,6 +31,11 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     touch-action: none;
     -webkit-user-select: none; user-select: none;
+  }
+  /* dvh covers the whole screen where it is supported, so the bar sits on
+     the bottom edge rather than above a letterboxed strip */
+  @supports (height: 100dvh) {
+    html, body { height: 100dvh; }
   }
   #canvas {
     position: absolute; inset: 0;
@@ -44,7 +57,7 @@
     position: absolute;
     left: 0; right: 0;
     bottom: 0;
-    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    padding: 8px 10px max(7px, var(--safe-bottom));
     background: var(--panel-bg);
     color: var(--panel-fg);
     backdrop-filter: blur(12px);
@@ -222,8 +235,9 @@
     display: none;
     flex-direction: column;
     gap: 10px;
-    padding: 16px;
+    padding: calc(14px + var(--safe-top)) 16px calc(14px + var(--safe-bottom));
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     color: var(--panel-fg);
   }
   #boxpanel.open, #setpanel.open { display: flex; }
@@ -235,8 +249,9 @@
     display: none;
     flex-direction: column;
     gap: 14px;
-    padding: 22px 18px;
+    padding: calc(18px + var(--safe-top)) 18px calc(18px + var(--safe-bottom));
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     color: var(--panel-fg);
     align-items: center;
   }
@@ -308,7 +323,7 @@
       flex-direction: row;
       align-items: center;
       gap: 14px;
-      padding: 6px 14px calc(6px + env(safe-area-inset-bottom));
+      padding: 6px 14px max(6px, var(--safe-bottom));
     }
     #workbench { flex: 1 1 auto; }
     /* Two rows of four here as well. On one line the whole bar competes for
@@ -323,7 +338,7 @@
   /* Phones: every row earns its height. The plate shrinks, the brush column
      fills what is left, and nothing wraps to a second line. */
   @media (max-width: 520px) {
-    #toolbar { gap: 6px; padding: 7px 8px calc(6px + env(safe-area-inset-bottom)); }
+    #toolbar { gap: 6px; padding: 7px 8px max(5px, var(--safe-bottom)); }
     #traywrap { width: 132px; height: 74px; }
     #tray { height: 74px; }
     .tool { height: 31px; font-size: 17px; }

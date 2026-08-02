@@ -164,7 +164,16 @@ stateful — it carries water and a 16-pigment load:
 
 The bar is built to stay out of the way — on an iPhone it takes about a
 fifth of the screen, on a landscape iPad about an eighth, and nothing wraps
-to a second line at any size. The pans sit **beside the mixing plate** — in life they are one paint box,
+to a second line at any size. Safe areas are respected: the full-screen panels start below the notch (the
+paint box's first row was hidden under the status bar), and the bar ends
+flush with the screen with just the home-indicator clearance below the last
+row. The root background is painted in the bar's colour so that, on an
+installed PWA whose web view is letterboxed short of the screen, the strip
+reads as part of the bar instead of a black void. The insets are held in
+`--safe-top` / `--safe-bottom` so both layouts can be checked on a desktop
+browser, where `env()` is always zero.
+
+The pans sit **beside the mixing plate** — in life they are one paint box,
 and dip-then-mix is a constant back-and-forth — as two rows of four, which
 also keeps them a comfortable size. Then the brush row, then Size / Paper /
 Paint box / ⚙, then the tools. The status line hangs on a tab
