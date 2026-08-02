@@ -209,6 +209,20 @@ defined by mass tone + undertone colors (inverted to Kubelka-Munk K/S),
 tinting strength, density, staining, granulation strength, and granulation
 grain size (fine speckle vs coarse flocs).
 
+## Version
+
+The top of Settings shows the build that is actually running — commit and
+timestamp — and **Check for update** re-fetches that stamp from the server
+with caching bypassed and compares. If the server is newer it drops the
+service worker's caches, saves the session and reloads onto the new build.
+That answers a question a service worker and an installed PWA can otherwise
+hide: not "did the deploy finish" but "did the deploy reach this device".
+
+The stamp is written by the deploy workflow from the real commit, never
+hand-bumped, so it cannot drift from what is served. A local checkout reads
+`dev`. Every exported session log carries the build too, so a report always
+says which one produced it.
+
 ## Session logs (for feedback & bug reports)
 
 The **Log** button exports the whole session as JSON: every pan dip, water

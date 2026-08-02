@@ -25,6 +25,13 @@ jobs:
       - uses: actions/configure-pages@v5
         with:
           enablement: true
+      - name: Stamp the build version
+        run: |
+          printf "const BUILD = { commit: '%s', date: '%s', ref: '%s' };\n" \
+            "$(git rev-parse --short HEAD)" \
+            "$(date -u '+%Y-%m-%d %H:%M UTC')" \
+            "${GITHUB_REF_NAME}" > js/version.js
+          cat js/version.js
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .

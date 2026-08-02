@@ -58,6 +58,7 @@ const LOGBOOK = (() => {
       return {
         app: 'paintwheel',
         version: 2,
+        build: typeof BUILD !== 'undefined' ? BUILD : null,
         recordedAt: new Date(t0).toISOString(),
         durationFrames: frame,
         viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 },

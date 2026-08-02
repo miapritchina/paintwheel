@@ -288,6 +288,48 @@
   };
   window.SET = SET;
 
+  // ------------------------------------------------------------ version ---
+  // Which build is actually running, and is it the one that was deployed?
+  // The stamp comes from CI rather than a hand-bumped number, so it cannot
+  // drift from what is served. "Check for update" re-fetches the stamp with
+  // caching bypassed and compares — that is the difference between "the
+  // deploy finished" and "the deploy reached this device", which a service
+  // worker and an installed PWA can otherwise hide.
+  const buildLabel = `${BUILD.commit}${BUILD.date ? ` · ${BUILD.date}` : ''}`;
+  const buildEl = document.getElementById('buildinfo');
+  const updNote = document.getElementById('updnote');
+  buildEl.textContent = buildLabel;
+
+  document.getElementById('checkupd').addEventListener('click', async () => {
+    updNote.textContent = 'Checking…';
+    try {
+      const res = await fetch(`js/version.js?t=${Date.now()}`, { cache: 'no-store' });
+      const txt = await res.text();
+      const commit = (txt.match(/commit:\s*'([^']*)'/) || [])[1];
+      const date = (txt.match(/date:\s*'([^']*)'/) || [])[1] || '';
+      if (!commit) { updNote.textContent = 'Could not read the version on the server.'; return; }
+      if (commit === BUILD.commit) {
+        updNote.textContent = `Up to date — running the deployed build (${commit}).`;
+        return;
+      }
+      updNote.textContent = `Server has ${commit}${date ? ` · ${date}` : ''} — updating…`;
+      // drop the service worker's caches so the reload cannot be served the
+      // old shell, then take the new one
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+      }
+      if (navigator.serviceWorker) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.update().catch(() => r.unregister())));
+      }
+      await saveState();
+      location.reload();
+    } catch (e) {
+      updNote.textContent = `Could not reach the server (${e.message}). You are offline — this is the last build that loaded.`;
+    }
+  });
+
   const settingsPanel = document.getElementById('setpanel');
   const dryingEl = document.getElementById('drying');
   const pickupEl = document.getElementById('pickup');

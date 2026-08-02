@@ -271,6 +271,16 @@
   .setrow.check > span:first-child { flex: 0 0 auto; }
   .setrow input[type=checkbox] { width: 18px; height: 18px; }
   #settitle { font-size: 15px; opacity: 0.85; }
+  #versionrow {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; max-width: 420px;
+    justify-content: center;
+    font-size: 12px;
+  }
+  #buildinfo { opacity: 0.7; font-variant-numeric: tabular-nums; }
+  #updnote {
+    padding-left: 0; text-align: center; margin-top: -8px; min-height: 15px;
+  }
   #boxslots {
     display: grid;
     grid-template-columns: repeat(8, 1fr);
@@ -415,6 +425,11 @@
 </div>
 <div id="setpanel">
   <div id="settitle">Settings</div>
+  <div id="versionrow">
+    <span id="buildinfo">version…</span>
+    <button id="checkupd" class="small">Check for update</button>
+  </div>
+  <div class="setnote" id="updnote"></div>
 
   <div class="setrow"><span>Drying speed</span><input id="drying" type="range" min="0" max="100" value="30"></div>
   <div class="setnote">How fast the sheet loses its shine. Left = minutes of open wet-in-wet time, right = sets in seconds.</div>
@@ -449,6 +464,7 @@
 
   <button id="setclose" style="align-self:center;padding:8px 22px;border:none;border-radius:9px;background:rgba(255,255,255,0.16);color:var(--panel-fg);font-size:14px;">Done</button>
 </div>
+<script src="js/version.js"></script>
 <script src="js/pigments.js"></script>
 <script src="js/store.js"></script>
 <script src="js/logbook.js"></script>
