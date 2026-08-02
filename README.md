@@ -218,10 +218,18 @@ service worker's caches, saves the session and reloads onto the new build.
 That answers a question a service worker and an installed PWA can otherwise
 hide: not "did the deploy finish" but "did the deploy reach this device".
 
-The stamp is written by the deploy workflow from the real commit, never
-hand-bumped, so it cannot drift from what is served. A local checkout reads
-`dev`. Every exported session log carries the build too, so a report always
-says which one produced it.
+The build id is a hash of the app's own source, written by `tools/stamp.sh`
+and committed; CI fails the deploy if it is stale. It is a hash rather than
+a commit SHA injected at deploy time for a reason: this site is published by
+**two** deployers that both fire on a push — the workflow in
+`.github/workflows`, and GitHub's own built-in branch builder — and
+whichever finishes last wins. A stamp written by one of them is a coin toss,
+and the built-in builder publishes the branch verbatim. Committing it makes
+both deployers publish the same thing. A hash also answers the real question
+better than a SHA: it changes exactly when the served files change.
+
+Every exported session log carries the build too, so a report always says
+which one produced it.
 
 ## Session logs (for feedback & bug reports)
 

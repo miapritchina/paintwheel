@@ -295,7 +295,7 @@
   // caching bypassed and compares — that is the difference between "the
   // deploy finished" and "the deploy reached this device", which a service
   // worker and an installed PWA can otherwise hide.
-  const buildLabel = `${BUILD.commit}${BUILD.date ? ` · ${BUILD.date}` : ''}`;
+  const buildLabel = `${BUILD.build}${BUILD.date ? ` · ${BUILD.date}` : ''}`;
   const buildEl = document.getElementById('buildinfo');
   const updNote = document.getElementById('updnote');
   buildEl.textContent = buildLabel;
@@ -305,10 +305,10 @@
     try {
       const res = await fetch(`js/version.js?t=${Date.now()}`, { cache: 'no-store' });
       const txt = await res.text();
-      const commit = (txt.match(/commit:\s*'([^']*)'/) || [])[1];
+      const commit = (txt.match(/build:\s*'([^']*)'/) || [])[1];
       const date = (txt.match(/date:\s*'([^']*)'/) || [])[1] || '';
       if (!commit) { updNote.textContent = 'Could not read the version on the server.'; return; }
-      if (commit === BUILD.commit) {
+      if (commit === BUILD.build) {
         updNote.textContent = `Up to date — running the deployed build (${commit}).`;
         return;
       }
