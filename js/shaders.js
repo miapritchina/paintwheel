@@ -209,7 +209,11 @@ void main() {
   float pc = pigTotal(vUV);
   vec2 gp = 0.5 * vec2(pigTotal(vUV + vec2(uTexel.x, 0.0)) - pigTotal(vUV - vec2(uTexel.x, 0.0)),
                        pigTotal(vUV + vec2(0.0, uTexel.y)) - pigTotal(vUV - vec2(0.0, uTexel.y)));
-  target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.02, 0.08, h);
+  // The gate used to open at h=0.02 and only reach full strength at 0.08 —
+  // but a brush dab lays down 0.01..0.05, so for ordinary painting this term
+  // was switched off and colour dropped into a wet wash hardly moved. It has
+  // to open where the water a brush actually leaves lives.
+  target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.003, 0.018, h);
 
   // device tilt: only a genuinely wet film runs (drips), damp washes hold;
   // fiber modulation breaks the advancing front into fingers
@@ -273,6 +277,7 @@ uniform sampler2D uPaper;
 uniform float uEvap;
 uniform float uEdgeEvap;
 uniform float uAbsorb;
+uniform float uRunAbsorb;
 uniform float uSatEvap;
 uniform float uWetThresh;
 layout(location=0) out vec4 oFlow;
@@ -295,7 +300,16 @@ void main() {
   h -= uDt * uEvap * (1.0 + uEdgeEvap * edge) * smoothstep(0.0, 0.0005, h);
 
   float cap = pap.y;
-  float absorb = min(uAbsorb * uDt * max(cap - s.x, 0.0), max(h, 0.0));
+  // A running bead wets paper that is still dry, and dry paper drinks fast:
+  // imbibition is quickest at the advancing front and slows as the sheet
+  // fills (Washburn). Without this the only thing that ever stopped a tilted
+  // run was evaporation, so water slid on and on as if the paper were glass.
+  // Deliberately outside the pulsed drying budget — soaking in is not
+  // evaporation, and must not scale with the drying slider.
+  float speed = length(f.yz);
+  float stillDry = 1.0 - smoothstep(0.0, 0.6, s.x / max(cap, 1e-4));
+  float running = uRunAbsorb * uDt * stillDry * smoothstep(0.02, 0.25, speed);
+  float absorb = min((uAbsorb * uDt + running) * max(cap - s.x, 0.0), max(h, 0.0));
   s.x += absorb;
   h -= absorb;
   h = max(h, 0.0);

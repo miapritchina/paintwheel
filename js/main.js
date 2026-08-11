@@ -285,6 +285,8 @@
     runoff: true,      // paint and water travel across the sheet
     pressureSize: true,// stylus pressure drives brush size
     deplete: true,     // the brush runs out as you paint
+    tiltStrength: 1.0, // how steeply tilt runs the paint
+    pressRange: 0.6,   // how far stylus force moves the brush size
   };
   window.SET = SET;
 
@@ -369,6 +371,8 @@
   const runoffEl = document.getElementById('runoff');
   const pressEl = document.getElementById('presssize');
   const depleteEl = document.getElementById('deplete');
+  const tiltStrEl = document.getElementById('tiltstrength');
+  const pressRangeEl = document.getElementById('pressrange');
 
   // Drying speed: slider 0..100 -> 0.25x .. 4x around the base rate, so the
   // sheet can be kept open for minutes or pushed to dry in seconds.
@@ -384,6 +388,8 @@
     SET.runoff = runoffEl.checked;
     SET.pressureSize = pressEl.checked;
     SET.deplete = depleteEl.checked;
+    SET.tiltStrength = (Number(tiltStrEl.value) / 100) * 2;
+    SET.pressRange = Number(pressRangeEl.value) / 100;
     sim.params.saltGrain = SET.saltGrain;
     // sparser as the crystals get bigger, so grains never merge into a mat
     sim.params.saltSpacing = 4.0 + SET.saltGrain * 2.4;
@@ -391,7 +397,7 @@
     tray.setFlow(true); // the plate always flows: that's how mixing works
     if (log) LOGBOOK.log('settings', { ...SET });
   }
-  for (const el of [pickupEl, waterdipEl, saltsizeEl, runoffEl, pressEl, depleteEl]) {
+  for (const el of [pickupEl, waterdipEl, saltsizeEl, runoffEl, pressEl, depleteEl, tiltStrEl, pressRangeEl]) {
     el.addEventListener('input', () => applySettings());
   }
   dryingEl.addEventListener('input', () => applyDrying());
@@ -484,15 +490,42 @@
   });
 
   // Tilt: thick wet paint runs downhill; iOS needs a user-gesture permission.
+  //
+  // Two things the naive version got wrong. beta/gamma are angles of the
+  // DEVICE, and on an iPad held in landscape the screen is rotated a quarter
+  // turn inside it — so downhill came out sideways. The vector is rotated by
+  // the screen angle into screen space. And nobody holds a tablet like a
+  // sheet of paper on a table: enabling tilt now takes whatever angle you
+  // are holding at that moment as level, and only movement away from it runs
+  // the paint.
   const tiltBtn = document.getElementById('tilt');
   let tiltOn = false;
+  let tiltRef = null;
+
+  function screenAngle() {
+    const a = (window.screen && screen.orientation && screen.orientation.angle);
+    return ((a != null ? a : window.orientation || 0) * Math.PI) / 180;
+  }
+
   function onOrient(e) {
     if (!tiltOn || e.beta == null) return;
-    const gx = Math.sin((e.gamma || 0) * Math.PI / 180);
-    const gy = Math.sin((e.beta || 0) * Math.PI / 180);
-    const k = 0.25;
-    sim.params.tilt = [gx * k, -gy * k];
+    if (!tiltRef) tiltRef = { beta: e.beta, gamma: e.gamma || 0 };
+    const dBeta = e.beta - tiltRef.beta;
+    const dGamma = (e.gamma || 0) - tiltRef.gamma;
+    // device frame
+    const gx = Math.sin((dGamma * Math.PI) / 180);
+    const gy = Math.sin((dBeta * Math.PI) / 180);
+    // -> screen frame
+    const a = screenAngle();
+    const c = Math.cos(a), s = Math.sin(a);
+    const sx = gx * c + gy * s;
+    const sy = -gx * s + gy * c;
+    const k = 0.25 * SET.tiltStrength;
+    sim.params.tilt = [sx * k, -sy * k];
+    window.__tiltDebug = { beta: e.beta, gamma: e.gamma, dBeta, dGamma,
+                           angleDeg: (a * 180) / Math.PI, tilt: sim.params.tilt };
   }
+
   tiltBtn.addEventListener('click', async () => {
     if (!tiltOn && typeof DeviceOrientationEvent !== 'undefined' &&
         typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -501,9 +534,17 @@
       } catch { return; }
     }
     tiltOn = !tiltOn;
+    tiltRef = null; // however you are holding it right now IS level
     tiltBtn.style.background = tiltOn ? 'rgba(120,180,255,0.35)' : '';
-    if (tiltOn) window.addEventListener('deviceorientation', onOrient);
-    else { window.removeEventListener('deviceorientation', onOrient); sim.params.tilt = [0, 0]; }
+    LOGBOOK.log('tiltMode', { on: tiltOn, screenAngle: Math.round((screenAngle() * 180) / Math.PI) });
+    if (tiltOn) {
+      window.addEventListener('deviceorientation', onOrient);
+      updateBrushView('Tilt on — the angle you are holding now is level');
+    } else {
+      window.removeEventListener('deviceorientation', onOrient);
+      sim.params.tilt = [0, 0];
+      updateBrushView('Tilt off');
+    }
   });
 
   // What a touch on the paper does: paint, sprinkle salt, or drop clean
@@ -591,17 +632,26 @@
   // Apple Pencil reports 0..1 force; mouse/finger report 0 or 0.5. Give the
   // pen a wider, slightly convex range so light strokes go genuinely fine
   // and a hard press spreads the whole belly of the brush.
+  // A Pencil spends nearly all its time between about 0.05 and 0.5 of full
+  // scale; you have to lean on it to reach 1.0. The old curve was p^1.4,
+  // which is convex — it squashed exactly that working range flat and only
+  // opened up under a hard press. A concave curve spends the size range
+  // where the hand actually is.
   function pressureOf(e) {
     if (e.pointerType === 'pen') {
-      const p = e.pressure > 0 ? e.pressure : 0.5;
-      return 0.12 + 1.05 * Math.pow(p, 1.4);
+      const p = Math.min(Math.max(e.pressure > 0 ? e.pressure : 0.4, 0), 1);
+      return Math.pow(p, 0.55);
     }
-    return e.pressure > 0 && e.pressure !== 0.5 ? e.pressure : 0.6;
+    return e.pressure > 0 && e.pressure !== 0.5 ? e.pressure : 0.55;
   }
 
   function brushSize(pressure) {
     const base = Number(sizeEl.value);
-    return SET.pressureSize ? base * (0.25 + 0.75 * pressure) : base;
+    if (!SET.pressureSize) return base;
+    // pressRange 0 = size fixed, 1 = a light touch is a third of the width
+    // and a firm one about half again as wide
+    const r = SET.pressRange;
+    return base * (1 - r * 0.85 + pressure * r * 1.5);
   }
 
   function dab(x, y, pressure) {
@@ -900,6 +950,7 @@
           pickup: Number(pickupEl.value), waterdip: Number(waterdipEl.value),
           saltsize: Number(saltsizeEl.value), runoff: runoffEl.checked,
           presssize: pressEl.checked, deplete: depleteEl.checked,
+          tiltstrength: Number(tiltStrEl.value), pressrange: Number(pressRangeEl.value),
         },
         painting: snap,
         tray: traySnap,
@@ -936,6 +987,8 @@
         if (s.runoff != null) runoffEl.checked = s.runoff;
         if (s.presssize != null) pressEl.checked = s.presssize;
         if (s.deplete != null) depleteEl.checked = s.deplete;
+        if (s.tiltstrength != null) tiltStrEl.value = s.tiltstrength;
+        if (s.pressrange != null) pressRangeEl.value = s.pressrange;
         applySettings(false);
       }
       if (st.log) LOGBOOK.restore(st.log);

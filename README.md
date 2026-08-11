@@ -59,7 +59,15 @@ Beyond the papers, the model borrows two effects:
 
 - **Marangoni flow** — paint lowers the water's surface tension, so a loaded
   drop pulls itself outward through a wet wash (log-concentration form per
-  the Gibbs isotherm). This is what makes wet-on-wet blooms travel.
+  the Gibbs isotherm). This is what makes wet-on-wet blooms travel. It is
+  gated on film depth, and that gate has to open where the water a brush
+  actually leaves lives: at one point it opened at h=0.02 while a dab lays
+  down 0.01–0.05, so for ordinary painting the term was switched off and
+  colour dropped into a wet wash barely moved.
+- **Imbibition at the advancing front** — dry paper drinks fastest where it
+  is first wetted, and slows as it fills (Washburn). Without that, moving
+  water only ever lost volume to evaporation, so a tilted run slid on as if
+  the paper were glass instead of dying out as the sheet drank it.
 - **Pinned contact line** — a wash boundary stays put while rim evaporation
   draws interior fluid (and pigment) outward: the coffee-ring effect that
   dries into dark edge lines.
@@ -261,9 +269,13 @@ way to report "this didn't behave like real watercolor".
   paint — non-staining pigments (cerulean) lift, staining ones
   (quinacridone, phthalo) leave a permanent tint, per their measured
   staining power.
-- **Tilt**: on iPhone/iPad, toggle Tilt and physically tilt the device —
-  thick wet paint runs downhill and fingers along paper fibers
-  (damp washes hold).
+- **Tilt**: toggle Tilt and physically tilt the device — thick wet paint
+  runs downhill and fingers along paper fibres (damp washes hold). The
+  angle you are holding the device at when you switch it on is taken as
+  level, so you can work at whatever angle is comfortable rather than flat
+  on a table, and the reading is rotated into screen space so it points
+  downhill on an iPad held sideways too. **Tilt strength** in Settings sets
+  how steeply it runs.
 - **Dry fast**: hold to flash-dry, then glaze over — dried washes resist
   re-blending except through deliberate rewetting.
 - **Save** exports a PNG.

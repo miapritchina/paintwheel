@@ -48,7 +48,10 @@ class WatercolorSim {
       grav: 6.0,        // water-surface slope pull (lubrication mobility)
       paperSlope: 0.5,  // paper relief influence on flow
       inertia: 0.8,     // velocity memory: lets drop impulses ripple outward
-      maran: 1.0,       // Marangoni strength: blooms in wet washes
+      // Marangoni strength. Measured on a lightly-wetted sheet, a drop of
+      // colour reaches 2247 cells at 1.0, 3937 at 2.0 and 5864 at 3.5; at
+      // 1.0 wet-on-wet barely reacted, which is not what a wet sheet does.
+      maran: 2.2,       // Marangoni strength: blooms in wet washes
       tilt: [0, 0],     // gravity vector from device tilt
       edgeFlow: 0.03,   // outward drift at wash rim (contact line ~pinned)
       maxSpeed: 0.6,    // CFL guard, cells/step
@@ -63,6 +66,7 @@ class WatercolorSim {
       evap: 0.0000037,  // bulk evaporation (per substep, scaled by dryPulse)
       edgeEvap: 20.0,   // extra rim evaporation multiplier (edge darkening)
       absorb: 0.000012, // absorption into the sheet
+      runAbsorb: 0.0025, // extra imbibition under moving water on dry paper
       satEvap: 0.0000015, // the damp sheet drying out: must be well under
                           // `absorb`, or the paper can never become damp
                           // and there is no damp stage and no backruns
@@ -541,6 +545,7 @@ class WatercolorSim {
       gl.uniform1f(p.uniforms.uEvap, P.evap * dry);
       gl.uniform1f(p.uniforms.uEdgeEvap, P.edgeEvap);
       gl.uniform1f(p.uniforms.uAbsorb, P.absorb * dry);
+      gl.uniform1f(p.uniforms.uRunAbsorb, P.runAbsorb);
       gl.uniform1f(p.uniforms.uSatEvap, P.satEvap * dry);
       gl.uniform1f(p.uniforms.uWetThresh, P.wetThresh);
       this._draw();
