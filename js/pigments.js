@@ -36,7 +36,7 @@
 // engine can do without disturbing the painting.
 const MAX_CHANNELS = 12;
 const N_CHANNELS = MAX_CHANNELS; // JS-side arrays are always full size
-let PIG_TEXTURES = 3;            // texture pairs actually allocated
+let PIG_TEXTURES = 1;            // texture pairs actually allocated
 const texturesFor = (colours) => Math.max(1, Math.ceil(colours / 4));
 
 const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings, setPalette, addPan, removePan } = (() => {
@@ -275,10 +275,11 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings, setPalette, addPan
     channels.version++;
   }
 
-  // default working palette of twelve (artist will finalize later)
-  ['Lemon', 'Irgazin', 'Raw Sien', 'B. Siena',
-   'Carmine', 'Q. Pink', 'Diox.', 'Ultram.',
-   'Cobalt', 'Prussian', 'C. Turq', 'Emerald']
+  // Four by default — one texture pair, a third of the pigment work of
+  // twelve, and a limited palette is how most watercolours are painted
+  // anyway. These four are the ones the artist actually chose to work with
+  // in a recorded session; "New painting..." changes them.
+  ['Lemon', 'Opera', 'C. Turq', 'Gran. Bk']
     .forEach((short, slot) => assign(slot, box.findIndex((p) => p.short === short)));
 
   return { PAINTBOX: box, CHANNELS: channels, PANS: pans, assignPan: assign,

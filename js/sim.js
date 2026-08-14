@@ -574,8 +574,8 @@ class WatercolorSim {
   // is what makes a bloom — the drop's water pushes outward through the
   // damp paint and strands it in a cauliflower ring.
   dropWater(xCss, yCss, radiusCss, amount = 1.0) {
-    const empty = this._emptyPig || (this._emptyPig = new Float32Array(PIG_TEXTURES * 4));
-    this.splat(xCss, yCss, radiusCss, 0.28 * amount, empty, 1.0, 0);
+    const empty = this._emptyPig || (this._emptyPig = new Float32Array(N_CHANNELS));
+    this.splat(xCss, yCss, radiusCss, 0.12 * amount, empty, 1.0, 0);
     // A backrun is not just water pushing pigment about: the drop lands on
     // paint that has only just set and RE-DISSOLVES it, then carries it out
     // to the drop's rim, where it strands as the cauliflower edge. Lifting

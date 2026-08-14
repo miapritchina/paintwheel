@@ -420,14 +420,18 @@
   }));
 
   document.getElementById('clean').addEventListener('pointerdown', () => {
-    // rinsed and shaken out: no colour and no water at all. Whatever you do
-    // next starts from a genuinely empty brush.
+    // Rinse takes the COLOUR off the hairs and nothing else — water is the
+    // water slider's business, and rinsing used to empty it too.
+    //
+    // The recipe survives as well. A session log showed the cost of clearing
+    // it: after a rinse the artist made 592 more dabs, every one of them
+    // carrying no colour at all, painting clean water over the picture and
+    // then trying to dry it off. Keeping the mix means the next tap on any
+    // pan brings the whole recipe back, and the preview strip vanishing is
+    // the signal that the brush is empty.
     brush.pig.fill(0);
-    brush.water = 0;
-    PARTS.fill(0);
-    refreshParts();
-    LOGBOOK.log('clean');
-    updateBrushView('Brush clean — no colour, no water, no mix');
+    LOGBOOK.log('clean', { water: Math.round(brush.water * 100) / 100 });
+    updateBrushView('Rinsed — colour off, water untouched');
   });
 
   // Sponge: sheds water, keeps most of the pigment (the "thirsty brush" for
@@ -1013,8 +1017,10 @@
   }
 
   function dropAt(x, y) {
-    // a drop off the brush is much bigger than the brush's own footprint
-    const r = Number(sizeEl.value) * 1.5 + 8;
+    // A drop is a little wider than the brush's own footprint. It used to be
+    // 1.5x the brush and 8x the water of a dab, which is a flood: one drop
+    // carried as much water as twenty-four brush dabs.
+    const r = Number(sizeEl.value) * 1.1 + 6;
     sim.dropWater(x, y, r, 1.0);
     LOGBOOK.log('drop', { x: Math.round(x), y: Math.round(y), r: Math.round(r) });
   }

@@ -149,8 +149,13 @@ glass** and a **sponge**. The brush is stateful — it carries water and a
   the work done on an iPhone, and the reason the sheet could only afford 12
   pigment channels once it was gone. Diluting a mix is now the Water and
   Dilution sliders rather than a puddle.
-- **🌀 Rinse** empties the brush and clears the recipe — which is what
-  rinsing a brush means.
+- **🌀 Rinse** takes the colour off the hairs and nothing else. It leaves the
+  water alone (that is the water slider's job) and it leaves the recipe
+  standing, so the next tap on any pan brings the whole mix back. It used to
+  empty all three, and a session log showed what that cost: after one rinse
+  the artist made 592 more dabs, every one of them carrying no colour,
+  painting clean water over the picture and then trying to dry it off again.
+  The preview strip disappearing is now the signal that the brush is empty.
 - **💧 Water glass**: adds water to the brush and washes a little pigment off.
   Hold and swirl for more of both.
 - **🧽 Sponge**: blots water off the brush while keeping most of the pigment
@@ -176,10 +181,13 @@ glass** and a **sponge**. The brush is stateful — it carries water and a
   from table salt to rock salt in Settings. Each one soaks water and shoves
   pigment into a starburst; like real salt it only textures a wash caught in
   the damp band — too wet and it dissolves, too dry and nothing happens.
-- **💦 Water drop** — toggle, then tap. Drops clean water into a wash. On a
-  wash that has just lost its shine this is the classic bloom-maker: the
-  drop pushes outward through the damp paint and strands it in a
-  cauliflower ring.
+- **💦 Water drop** — toggle, then tap. What makes this different from
+  touching the paper with a clean wet brush is not the water, it is that a
+  drop briefly **re-dissolves paint that has already set** and carries it to
+  its own rim. That is what a backrun is; a wet brush merely wets. It also
+  carries a fixed volume regardless of what the brush holds — about ten
+  brush dabs' worth over a slightly wider footprint. It used to be
+  twenty-four dabs' worth, which was less a drop than a spill.
 
 ## Layout
 
@@ -252,7 +260,10 @@ frame in the old build. Three changes:
 
 ## Paint box & channels
 
-The working palette is **1 to 12 pans** chosen from the full paint box, and
+**Four colours by default** — one texture pair, a third of the pigment work
+of twelve, and a limited palette is how most watercolours get painted
+anyway. The working palette is **1 to 12 pans** chosen from the full paint
+box, and
 a pan *is* a simulation channel — slot i always paints with channel i.
 Swapping a pan therefore recolours any earlier strokes made with the paint
 that left.
