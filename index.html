@@ -67,6 +67,17 @@
     gap: 7px;
     z-index: 10;
   }
+  /* The mix drawn as a dried stroke on the paper, rather than described.
+     Hidden entirely when the brush is empty, so it costs nothing then. */
+  #mixstroke {
+    display: none;
+    width: 100%;
+    max-width: 420px;
+    height: 34px;
+    margin: 0 auto;
+    border-radius: 5px;
+  }
+  #mixstroke.on { display: block; }
   /* the pans, and nothing else — the row used to share its width with a
      mixing plate, then a recipe readout, then a preview swatch */
   #workbench {
@@ -350,6 +361,7 @@
 <div id="brushcursor"></div>
 <div id="err"></div>
 <div id="toolbar">
+  <canvas id="mixstroke" title="The mix as it dries on this paper: colour, granulation and transparency"></canvas>
   <div id="workbench">
     <div id="palette"></div>
   </div>

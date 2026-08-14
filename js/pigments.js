@@ -178,6 +178,50 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings, setPalette, addPan
     return `rgb(${out[0]},${out[1]},${out[2]})`;
   };
 
+  // Kubelka-Munk for ONE pixel, given a per-channel optical thickness. The
+  // brush preview needs to vary each pigment's concentration pixel by pixel
+  // (that is what granulation IS), so the whole-mixture helper above cannot
+  // do it. Mirrors the render shader, metals included: mica does not absorb
+  // transparently, it covers, so it is laid over the result instead of
+  // joining the mixture.
+  channels.kmPixel = (conc, paperRGB) => {
+    const K = [0, 0, 0], S = [0, 0, 0], mc = [0, 0, 0];
+    let total = 0, metal = 0;
+    for (let i = 0; i < conc.length; i++) {
+      const c = conc[i];
+      const ch = channels[i];
+      if (!ch || c <= 0) continue;
+      if (ch.metal > 0) {
+        metal += c * ch.metal;
+        for (let j = 0; j < 3; j++) mc[j] += c * ch.metal * ch.mcol[j];
+        continue;
+      }
+      total += c;
+      for (let j = 0; j < 3; j++) { K[j] += c * ch.K[j]; S[j] += c * ch.S[j]; }
+    }
+    const out = [0, 0, 0];
+    for (let j = 0; j < 3; j++) {
+      const Rp = paperRGB[j];
+      let R = Rp;
+      if (total > 1e-6) {
+        const sj = Math.max(S[j], 1e-6);
+        const a = 1 + K[j] / sj;
+        const b = Math.sqrt(Math.max(a * a - 1, 1e-8));
+        const c = Math.min(b * sj, 20);
+        const sh = Math.sinh(c), ch2 = Math.cosh(c);
+        const den = a * sh + b * ch2;
+        const Rl = sh / den, Tl = b / den;
+        R = Rl + (Tl * Tl * Rp) / (1 - Rl * Rp);
+      }
+      if (metal > 1e-4) {
+        const cover = 1 - Math.exp(-metal * 5);
+        R = R * (1 - cover) + Math.min(1, mc[j] / metal) * cover;
+      }
+      out[j] = clamp(R, 0, 1);
+    }
+    return out;
+  };
+
   const pans = [];
 
   // Bind a paint to a pan. Slot i owns channel i, full stop.

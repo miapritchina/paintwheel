@@ -106,6 +106,115 @@
     updateBrushView(`Water ${waterSl.value}%`);
   });
 
+  // ------------------------------------------------- the mix, as a stroke --
+  // A swatch of flat colour cannot show what a watercolour actually does:
+  // heavy pigments drop into the tooth of the paper and separate out, thin
+  // paint lets the sheet through. So the preview is a real dried stroke,
+  // rendered with the same Kubelka-Munk optics and the same granulation rule
+  // as the paper itself — per pigment, per pixel — on the CPU at 420x34,
+  // which costs nothing and needs no second GL context.
+  const strokeCanvas = document.getElementById('mixstroke');
+  const sctx = strokeCanvas.getContext('2d');
+  let strokeField = null; // paper height, generated once
+
+  function paperField(w, h) {
+    if (strokeField && strokeField.w === w && strokeField.h === h) return strokeField;
+    const fine = new Float32Array(w * h);
+    const coarse = new Float32Array(w * h);
+    const hash = (x, y, s) => {
+      let n = Math.sin(x * 127.1 + y * 311.7 + s) * 43758.5453;
+      return n - Math.floor(n);
+    };
+    const vnoise = (x, y, s) => {
+      const xi = Math.floor(x), yi = Math.floor(y);
+      const xf = x - xi, yf = y - yi;
+      const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+      const a = hash(xi, yi, s), b = hash(xi + 1, yi, s);
+      const c = hash(xi, yi + 1, s), d = hash(xi + 1, yi + 1, s);
+      return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+    };
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        fine[i] = 0.45 * vnoise(x * 0.7, y * 0.7, 3.1) + 0.32 * vnoise(x * 1.7, y * 1.7, 7.7)
+                + 0.23 * vnoise(x * 0.22, y * 0.22, 1.3);
+        // two octaves, or the coarse flocs read as a square lattice
+        coarse[i] = 0.62 * vnoise(x * 0.15, y * 0.15, 5.9) + 0.38 * vnoise(x * 0.37, y * 0.37, 11.2);
+      }
+    }
+    strokeField = { w, h, fine, coarse };
+    return strokeField;
+  }
+
+  function renderMixStroke() {
+    const total = brushTotal();
+    strokeCanvas.classList.toggle('on', total > 0.01);
+    if (total <= 0.01) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cssW = strokeCanvas.clientWidth || 420;
+    const W = Math.max(60, Math.round(cssW * dpr));
+    const H = Math.round(34 * dpr);
+    if (strokeCanvas.width !== W || strokeCanvas.height !== H) {
+      strokeCanvas.width = W; strokeCanvas.height = H;
+    }
+    const fld = paperField(W, H);
+    const img = sctx.createImageData(W, H);
+    const px = img.data;
+    const paperRGB = (PAPERS[sim.paperName] || PAPERS.rough).color;
+    const conc = new Float64Array(NPIG);
+
+    // per-pigment settling parameters, as the render pass uses them
+    const gamma = [], grain = [], share = [];
+    for (let i = 0; i < NPIG; i++) {
+      const p = CHANNELS[i];
+      gamma.push(p ? p.gamma : 0);
+      grain.push(p ? p.grain : 0);
+      share.push(brush.pig[i]);
+    }
+    // a stroke: full strength at the left, running out to a thin dry-brush
+    // tail at the right, with the darker rim a drying edge leaves
+    const depth = 2.6 * Math.min(total / PIG_CAP, 1);
+    for (let x = 0; x < W; x++) {
+      const xn = x / (W - 1);
+      // a hand-drawn line, not a bar: the centre wanders and the stroke
+      // narrows as the brush runs out, leaving paper above and below
+      const centre = 0.5 + 0.055 * Math.sin(xn * 6.3 + 0.7) + 0.03 * Math.sin(xn * 15.1);
+      const halfW = 0.34 * (1 - 0.22 * xn);
+      const runOut = Math.pow(1 - xn, 1.3) * 0.9 + 0.08;
+      for (let y = 0; y < H; y++) {
+        const i = y * W + x;
+        const fine = fld.fine[i];
+        // the edge of a stroke is ragged at pigment scale
+        const dy = Math.abs(y / (H - 1) - centre) / (halfW * (0.93 + 0.14 * fine));
+        if (dy >= 1) { const o = i * 4; const pr = paperRGB;
+          px[o] = 255 * Math.pow(pr[0], 1 / 2.2); px[o + 1] = 255 * Math.pow(pr[1], 1 / 2.2);
+          px[o + 2] = 255 * Math.pow(pr[2], 1 / 2.2); px[o + 3] = 255; continue; }
+        const body = Math.pow(1 - dy * dy, 0.55);
+        const rim = 1 + 0.55 * Math.pow(dy, 5); // a drying edge leaves a dark line
+        // dry brush at the thin end: the tooth starts skipping
+        const skip = 1 - Math.max(0, (xn - 0.5) / 0.5) * Math.max(0, fine - 0.32) * 3.0;
+        const t = depth * body * rim * runOut * Math.max(skip, 0);
+        for (let k = 0; k < NPIG; k++) {
+          if (share[k] <= 0) { conc[k] = 0; continue; }
+          // granulation: the heavier the pigment and the coarser its grain,
+          // the more it drops out of suspension into the paper's valleys
+          const relief = gamma[k] > 0
+            ? 1 - (fine * (1 - grain[k]) + fld.coarse[i] * grain[k])
+            : 0.5;
+          const settle = gamma[k] > 0 ? (0.45 + 1.2 * relief) : 1;
+          conc[k] = share[k] * t * (1 - gamma[k] + gamma[k] * settle);
+        }
+        const rgb = CHANNELS.kmPixel(conc, paperRGB);
+        const o = i * 4;
+        px[o] = 255 * Math.pow(rgb[0], 1 / 2.2);
+        px[o + 1] = 255 * Math.pow(rgb[1], 1 / 2.2);
+        px[o + 2] = 255 * Math.pow(rgb[2], 1 / 2.2);
+        px[o + 3] = 255;
+      }
+    }
+    sctx.putImageData(img, 0, 0);
+  }
+
   function updateBrushView(msg) {
     const total = brushTotal();
     // the colour still drives the brush cursor on the paper
@@ -119,6 +228,7 @@
     paintSl.style.setProperty('--fill', color);
     brushcursor.style.background = total > 0.01 ? color.replace('rgb', 'rgba').replace(')', ',0.35)') : 'rgba(200,220,255,0.2)';
     consistencyEl.textContent = consistency();
+    renderMixStroke();
     if (msg !== undefined) pignameEl.textContent = msg;
   }
 

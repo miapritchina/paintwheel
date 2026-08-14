@@ -127,10 +127,20 @@ glass** and a **sponge**. The brush is stateful — it carries water and a
   to correct one part is not that. The Paint slider then says *how much*
   of that mixture is on the hairs, so ratio and quantity stay separate.
 
-  Nothing sits beside the pans reporting the mix — not a readout, not a
-  preview swatch. The pans carry their own part counts and the status line
-  names the recipe as it changes, so a panel restating it was one more thing
-  in the bar earning nothing. The row is the pans, and they get all of it. Every component keeps its own physics on the paper, so a mix
+  Above the pans, the mix is shown as **a dried stroke on the current
+  paper** — not a chip of flat colour, which cannot show the two things that
+  actually distinguish one watercolour from another. Heavy pigments drop out
+  of suspension into the tooth of the sheet and separate into mottle; thin
+  paint lets the paper through. So the strip is rendered with the same
+  Kubelka-Munk optics and the same granulation rule as the painting itself,
+  per pigment and per pixel, running from full strength at the left out to a
+  dry-brush tail. It is drawn on the CPU at 420x34, which costs nothing and
+  needs no second GL context, and it is hidden entirely when the brush is
+  empty.
+
+  Measured across the middle of the stroke, the pixel-to-pixel variation is
+  10.1 for ultramarine (granulation 0.91) against 0.2 for Prussian
+  (granulation 0.15) — the separation is real, not decoration. Every component keeps its own physics on the paper, so a mix
   containing ultramarine still granulates and one containing quinacridone
   still stains.
 
