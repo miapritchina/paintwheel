@@ -289,6 +289,10 @@
     width: 100%;
   }
   #boxgrid .pan.inuse { outline: 2px dashed rgba(255,255,255,0.5); }
+  /* the box shows each paint as a range, mass tone through to a thin wash,
+     so the dark ones are telling apart at a glance */
+  #boxgrid .pan { aspect-ratio: 1.45; }
+  .pan.swatchramp { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35); }
   .pan.addpan {
     background: rgba(255,255,255,0.08);
     color: var(--panel-fg);
@@ -413,7 +417,7 @@
   <div id="boxslots"></div>
   <div id="boxcost" class="boxhint"></div>
   <button id="boxremove" class="small" style="align-self:center">Remove colour</button>
-  <div class="boxhint">Paint box — tap a colour to put it in the selected pan:</div>
+  <div class="boxhint">Paint box — each swatch runs from mass tone to a thin wash. Tap one to put it in the selected pan:</div>
   <div id="boxgrid"></div>
   <button id="boxclose">Done</button>
 </div>
@@ -425,12 +429,12 @@
   </div>
   <div class="setnote" id="updnote"></div>
 
-  <div class="setrow"><span>Quality</span><select id="quality">
-    <option value="high">High — sharpest, warmest</option>
-    <option value="balanced" selected>Balanced</option>
-    <option value="battery">Battery — coolest</option>
+  <div class="setrow"><span>Detail</span><select id="quality">
+    <option value="high">Most detail · heaviest on battery</option>
+    <option value="balanced" selected>Medium detail · half the battery</option>
+    <option value="battery">Least detail · lightest on battery</option>
   </select></div>
-  <div class="setnote">How finely the water is simulated and how large the picture is drawn. On an iPad the simulation runs 729,000 cells and the picture 3.9 million pixels every frame at High; Balanced roughly halves both. Drop to Battery if the device gets warm.</div>
+  <div class="setnote">Battery and heat, most to least: <b>Most detail</b> → <b>Medium</b> → <b>Least</b>. Medium does about half the work of Most, and Least about a third of it. What changes is how finely the water is simulated and how large the picture is drawn — the painting behaves the same either way. Pick Least if the device gets warm.</div>
 
   <div class="setrow"><span>Drying speed</span><input id="drying" type="range" min="0" max="100" value="30"></div>
   <div class="setnote">How fast the sheet loses its shine. Left = minutes of open wet-in-wet time, right = sets in seconds.</div>

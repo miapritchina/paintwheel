@@ -589,8 +589,8 @@
       wrap.className = 'panwrap';
       const b = document.createElement('button');
       const inUse = PANS.some((pan) => pan.paint.id === p.id);
-      b.className = 'pan' + (inUse ? ' inuse' : '');
-      b.style.background = p.swatch;
+      b.className = 'pan swatchramp' + (inUse ? ' inuse' : '');
+      b.style.background = `linear-gradient(100deg, ${p.ramp.join(', ')})`;
       b.title = `${p.name} (${p.ci}) — tint ${p.tint}, granulation ${p.gamma}, grain ${p.grain}, staining ${p.omega}`;
       b.addEventListener('click', () => {
         if (selectedSlot === -1) {
@@ -685,8 +685,12 @@
     return ((a != null ? a : window.orientation || 0) * Math.PI) / 180;
   }
 
+  let tiltGotEvent = false;
+
   function onOrient(e) {
-    if (!tiltOn || e.beta == null) return;
+    if (!tiltOn) return;
+    if (e.beta == null && e.gamma == null) return; // a reading with no data
+    tiltGotEvent = true;
     if (!tiltRef) tiltRef = { beta: e.beta, gamma: e.gamma || 0 };
     const dBeta = e.beta - tiltRef.beta;
     const dGamma = (e.gamma || 0) - tiltRef.gamma;
@@ -705,25 +709,65 @@
                            angleDeg: (a * 180) / Math.PI, tilt: sim.params.tilt };
   }
 
+  // Motion access has to be asked for from a user gesture on iOS, and there
+  // are three ways it can come back with no tilt: denied now, denied before
+  // (in which case iOS never shows a prompt again), or granted but silent.
+  // All three used to `return` without a word, so the button appeared to do
+  // nothing at all — which is exactly what "it doesn't even ask" looks like.
+  let tiltWatchdog = null;
+
+  function stopTilt(msg) {
+    tiltOn = false;
+    tiltRef = null;
+    clearTimeout(tiltWatchdog);
+    window.removeEventListener('deviceorientation', onOrient);
+    sim.params.tilt = [0, 0];
+    tiltBtn.style.background = '';
+    if (msg) updateBrushView(msg);
+  }
+
   tiltBtn.addEventListener('click', async () => {
-    if (!tiltOn && typeof DeviceOrientationEvent !== 'undefined' &&
-        typeof DeviceOrientationEvent.requestPermission === 'function') {
+    if (tiltOn) { stopTilt('Tilt off'); LOGBOOK.log('tiltMode', { on: false }); return; }
+
+    if (typeof DeviceOrientationEvent === 'undefined') {
+      updateBrushView('This device reports no motion sensor');
+      LOGBOOK.log('tiltMode', { on: false, why: 'unsupported' });
+      return;
+    }
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      let verdict;
       try {
-        if ((await DeviceOrientationEvent.requestPermission()) !== 'granted') return;
-      } catch { return; }
+        verdict = await DeviceOrientationEvent.requestPermission();
+      } catch (err) {
+        // iOS throws when it will not even show the prompt — most often in an
+        // installed web app, or when Motion & Orientation Access is switched
+        // off for Safari altogether
+        updateBrushView('iOS would not ask for motion access. Try Settings › Apps › Safari › Motion & Orientation Access, or open the site in Safari rather than the installed app.');
+        LOGBOOK.log('tiltMode', { on: false, why: 'requestPermission threw: ' + err.message });
+        return;
+      }
+      if (verdict !== 'granted') {
+        updateBrushView(`Motion access ${verdict}. iOS only asks once — to change it, clear this site's data in Settings › Apps › Safari.`);
+        LOGBOOK.log('tiltMode', { on: false, why: verdict });
+        return;
+      }
     }
-    tiltOn = !tiltOn;
+
+    tiltOn = true;
     tiltRef = null; // however you are holding it right now IS level
-    tiltBtn.style.background = tiltOn ? 'rgba(120,180,255,0.35)' : '';
-    LOGBOOK.log('tiltMode', { on: tiltOn, screenAngle: Math.round((screenAngle() * 180) / Math.PI) });
-    if (tiltOn) {
-      window.addEventListener('deviceorientation', onOrient);
-      updateBrushView('Tilt on — the angle you are holding now is level');
-    } else {
-      window.removeEventListener('deviceorientation', onOrient);
-      sim.params.tilt = [0, 0];
-      updateBrushView('Tilt off');
-    }
+    tiltGotEvent = false;
+    tiltBtn.style.background = 'rgba(120,180,255,0.35)';
+    window.addEventListener('deviceorientation', onOrient);
+    LOGBOOK.log('tiltMode', { on: true, screenAngle: Math.round((screenAngle() * 180) / Math.PI) });
+    updateBrushView('Tilt on — the angle you are holding now is level');
+    // granted, listening, and still nothing arriving is its own failure
+    clearTimeout(tiltWatchdog);
+    tiltWatchdog = setTimeout(() => {
+      if (!tiltGotEvent) {
+        stopTilt('Motion access was granted but no readings are arriving. In an installed web app iOS often withholds them — open the site in Safari for tilt.');
+        LOGBOOK.log('tiltMode', { on: false, why: 'granted but silent' });
+      }
+    }, 2000);
   });
 
   // What a touch on the paper does: paint, sprinkle salt, or drop clean

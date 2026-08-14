@@ -131,6 +131,22 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings, setPalette, addPan
       // pans show the darkest possible mass tone; a metallic pan instead
       // shows its own colour, since it never darkens by glazing
       swatch: metal > 0 ? `rgb(${rgb.map((v) => Math.round(v * 255)).join(',')})` : kmMix(K, S, 14.0),
+      // A paint is not one colour, it is a range: mass tone straight from the
+      // pan through to a thin wash. Dark pigments are nearly indistinguishable
+      // at full strength and only show what they are when they are let down,
+      // so the paint box needs the whole ramp rather than the top of it. Each
+      // step is a real Kubelka-Munk render at a decreasing optical depth.
+      // The dilute steps are divided by tinting strength: Prussian at three
+      // times the strength of a cadmium is still solid black where the
+      // cadmium has already opened up, so a fixed ramp showed four identical
+      // black chips and one colour. Scaled, every paint spends its ramp
+      // across the range where it actually changes.
+      ramp: (metal > 0
+        ? [1, 1, 0.75, 0.5, 0.28]
+        : [14.0, 5.0 / d.tint, 2.0 / d.tint, 0.8 / d.tint, 0.3 / d.tint]
+      ).map((x) => (metal > 0
+        ? `rgb(${rgb.map((v) => Math.round(255 * Math.min(1, v * (0.5 + x * 0.7)))).join(',')})`
+        : kmMix(K, S, x))),
     };
   });
 

@@ -195,6 +195,10 @@ in ⚙ rather than taking two rows of the bar.
 
 ## Performance
 
+The **Detail** setting is named for battery rather than for quality, because
+that is the choice being made: most detail is heaviest on the battery, least
+is lightest.
+
 Two things cost power, and both are measured rather than guessed. On an iPad
 in landscape the simulation runs **729,000 cells** and the final image
 **3.9 million pixels**, every frame — about 294 million texture reads per
@@ -212,8 +216,10 @@ frame in the old build. Three changes:
 
 ## Settings (⚙)
 
-- **Quality** — simulation grid and drawn resolution. Drop to Battery if the
-  device gets warm.
+- **Detail** — most / medium / least, named for what they cost: battery and
+  heat run highest to lowest in that order. Medium does about half the work
+  of Most and Least about a third. Only the fineness of the simulation and
+  the drawn resolution change; the painting behaves identically.
 - **Drying speed** — 0.25×–4×: minutes of open wet-in-wet time, or set in
   seconds.
 - **Paint per dip** / **Water per dip** — how much one tap gives, on top of
@@ -261,6 +267,11 @@ only on a blank sheet.
 An earlier build carried 16 channels so a swap could take a spare one and
 leave old strokes alone; that cost a quarter of every simulation step to
 protect a case the artist does not care about. Each paint is
+shown in the paint box as a **ramp from mass tone to a thin wash** rather
+than a single chip — at full strength Prussian, Phthalo and Ultramarine are
+three near-identical blacks, and a paint only shows what it is once it is
+let down. The dilute steps are divided by tinting strength so every paint
+spends its ramp across the range where it actually changes. Each paint is
 defined by mass tone + undertone colors (inverted to Kubelka-Munk K/S),
 tinting strength, density, staining, granulation strength, and granulation
 grain size (fine speckle vs coarse flocs).
@@ -312,7 +323,13 @@ way to report "this didn't behave like real watercolor".
   paint — non-staining pigments (cerulean) lift, staining ones
   (quinacridone, phthalo) leave a permanent tint, per their measured
   staining power.
-- **Tilt**: toggle Tilt and physically tilt the device — thick wet paint
+- **Tilt**: toggle Tilt and physically tilt the device. iOS requires motion
+  access, and there are three ways it can silently not happen — denied now,
+  denied on a previous visit (iOS then never asks again), or granted but
+  withholding readings, which is common in an installed web app. All three
+  used to fail without a word; each now says which one it was and what to do
+  about it, and the button does not light up unless readings are actually
+  arriving. — thick wet paint
   runs downhill and fingers along paper fibres (damp washes hold). The
   angle you are holding the device at when you switch it on is taken as
   level, so you can work at whatever angle is comfortable rather than flat
