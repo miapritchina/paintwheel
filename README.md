@@ -122,10 +122,17 @@ glass** and a **sponge**. The brush is stateful — it carries water and a
 - **Mix by parts.** A pan is a dial for its own share of the recipe:
   **tap** adds a part, **drag up or down** sets it live, **long press**
   takes it out. Yellow to 7, black to 1, blue to 2 and the brush carries
-  7:1:2, shown as a running readout. Dragging matters more than tapping —
+  7:1:2. Dragging matters more than tapping —
   a proportion is something you feel your way to, and tapping seven times
   to correct one part is not that. The Paint slider then says *how much*
-  of that mixture is on the hairs, so ratio and quantity stay separate. Every component keeps its own physics on the paper, so a mix
+  of that mixture is on the hairs, so ratio and quantity stay separate.
+
+  What the brush holds is shown as **paint rather than as a sentence**: a
+  wide swatch running from the mixture at its current load on the left to a
+  thin wash on the right, the same ramp the paint box uses for a single
+  pigment. The recipe itself is already legible on the pans, which carry
+  their own part counts. Water is deliberately absent from the preview —
+  water decides how far a stroke spreads, not how strong its colour is. Every component keeps its own physics on the paper, so a mix
   containing ultramarine still granulates and one containing quinacridone
   still stains.
 

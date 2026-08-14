@@ -75,7 +75,7 @@
     for (let i = 0; i < NPIG; i++) brush.pig[i] *= k;
   }
 
-  const brushview = document.getElementById('brushview');
+  const brushPreview = document.getElementById('brushpreview');
   const brushcursor = document.getElementById('brushcursor');
   const pignameEl = document.getElementById('pigname');
   const consistencyEl = document.getElementById('consistency');
@@ -107,15 +107,26 @@
     updateBrushView(`Water ${waterSl.value}%`);
   });
 
+  // The brush shown as paint: the mixture at the load it is actually
+  // carrying on the left, thinning away to the right — the same ramp the
+  // paint box uses for a pigment, so the two read alike. Water is
+  // deliberately absent from it: water decides how far a stroke spreads,
+  // not how strong its colour is, and the preview should not imply
+  // otherwise.
+  function previewRamp(total) {
+    if (total <= 0.01) return null;
+    const depth = 16 * Math.min(total / PIG_CAP, 1);
+    return [1.0, 0.5, 0.22, 0.09, 0.035]
+      .map((f) => CHANNELS.kmColor(brush.pig, Math.max(depth * f, 0.02)));
+  }
+
   function updateBrushView(msg) {
     const total = brushTotal();
-    // thickness scales with load so a heavy brush looks like creamy masstone
-    // and a nearly-spent one shows a pale tint
     const color = total > 0.01 ? CHANNELS.kmColor(brush.pig, 1.5 + 12 * Math.min(total, 1.2)) : 'rgb(238,236,230)';
-    brushview.style.background = color;
-    brushview.style.borderColor = `rgba(160,200,255,${0.25 + 0.6 * brush.water})`;
-    // wet brush looks glossy, dry brush matte
-    brushview.style.boxShadow = `inset 0 -5px 8px rgba(0,0,0,0.25), inset 0 ${2 + 4 * brush.water}px ${3 + 6 * brush.water}px rgba(255,255,255,${0.15 + 0.35 * brush.water})`;
+    const ramp = previewRamp(total);
+    brushPreview.style.background = ramp
+      ? `linear-gradient(100deg, ${ramp.join(', ')})`
+      : '#efece6';
     // the sliders double as the level meters: writing them back keeps the
     // display honest whichever way the brush was changed (dip, swirl, stroke)
     sliderEcho = true;
@@ -174,7 +185,7 @@
   // separate — the same split as water and pigment on the brush.
   const paletteEl = document.getElementById('palette');
   const PARTS = new Float32Array(NPIG);
-  const mixEl = document.getElementById('mixreadout');
+
   window.PARTS = PARTS;
 
   function partsTotal() {
@@ -213,18 +224,8 @@
       badge.style.display = PARTS[i] > 0 ? 'block' : 'none';
       wrap.classList.toggle('inmix', PARTS[i] > 0);
     });
-    if (mixEl) mixEl.textContent = tot > 0 ? mixText() : 'tap pans to build a mix';
   }
   window.__refreshParts = refreshParts;
-
-  function clearMix(msg = 'Mix cleared') {
-    PARTS.fill(0);
-    brush.pig.fill(0);
-    refreshParts();
-    LOGBOOK.log('mixClear');
-    updateBrushView(msg);
-  }
-  document.getElementById('mixclear').addEventListener('click', () => clearMix());
 
   // A pan is a dial for its own share of the recipe:
   //   tap             +1 part

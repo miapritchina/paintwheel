@@ -87,28 +87,17 @@
     margin: 0 auto;
   }
   #tools { flex: 0 0 auto; }
-  /* the recipe, where the mixing plate used to be */
-  #mixbox {
+  /* What is on the brush, shown as paint rather than as a sentence: full
+     strength at the left, thinning to the right, exactly like the ramps in
+     the paint box. The recipe itself is already legible on the pans. */
+  #brushpreview {
     flex: 0 0 auto;
     width: 168px;
-    min-height: 72px;
+    height: 72px;
     border-radius: 10px;
-    background: rgba(255,255,255,0.07);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
-    padding: 6px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    align-items: flex-start;
+    background: #efece6;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35), inset 0 2px 8px rgba(0,0,0,0.18);
   }
-  #mixtitle { font-size: 10px; opacity: 0.5; letter-spacing: 0.08em; text-transform: uppercase; }
-  #mixreadout {
-    font-size: 11px; line-height: 1.35;
-    flex: 1 1 auto;
-    overflow: hidden;
-    opacity: 0.95;
-  }
-  #mixbox .small { padding: 3px 7px; font-size: 10px; align-self: stretch; }
   .panparts {
     position: absolute;
     top: 2px; right: 3px;
@@ -135,13 +124,6 @@
   .tool:active { background: rgba(255,255,255,0.3); }
   /* brush tip indicator: colour blob + the three live brush sliders */
   #brushwrap { display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
-  #brushview {
-    width: 30px; height: 30px; flex: 0 0 auto;
-    border-radius: 50% 50% 46% 46%;
-    border: 2px solid rgba(255,255,255,0.35);
-    background: #eee;
-    box-shadow: inset 0 -5px 8px rgba(0,0,0,0.25);
-  }
   #brushsliders { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
   .bsl { display: flex; align-items: center; gap: 4px; font-size: 11px; }
   .bsl > span { width: 13px; text-align: center; opacity: 0.8; flex: 0 0 auto; }
@@ -350,7 +332,7 @@
      fills what is left, and nothing wraps to a second line. */
   @media (max-width: 520px) {
     #toolbar { gap: 6px; padding: 7px 8px max(5px, var(--safe-bottom)); }
-    #mixbox { width: 124px; min-height: 66px; }
+    #brushpreview { width: 124px; height: 66px; }
     .tool { height: 31px; font-size: 17px; }
     #palette { gap: 4px; }
     .pan { aspect-ratio: 1.7; border-radius: 5px; }
@@ -373,11 +355,7 @@
 <div id="err"></div>
 <div id="toolbar">
   <div id="workbench">
-    <div id="mixbox">
-      <div id="mixtitle">Mix</div>
-      <div id="mixreadout">tap a pan to add a part, drag up or down to set it, hold to remove</div>
-      <button id="mixclear" class="small" title="Clear the mix">Clear mix</button>
-    </div>
+    <div id="brushpreview" title="What is on the brush: full strength on the left, thinning out to the right"></div>
     <div id="palette"></div>
   </div>
   <div id="brushrow">
@@ -387,7 +365,6 @@
       <button id="sponge" class="tool" title="Sponge: blot water off the brush (keeps most paint). Hold and wipe for drier.">🧽</button>
     </div>
     <div id="brushwrap" title="The brush: paint on the hairs, water on the hairs, and their ratio (dilution)">
-      <div id="brushview"></div>
       <div id="brushsliders">
         <label class="bsl" title="How much of the mix is on the brush"><span>🎨</span><input id="paintload" type="range" min="0" max="100" value="0"></label>
         <label class="bsl" title="How much water is on the brush — this alone decides how wet the paper gets, and it never changes the paint"><span>💧</span><input id="waterload" type="range" min="0" max="100" value="60"></label>
