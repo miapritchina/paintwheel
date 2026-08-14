@@ -18,7 +18,7 @@ RGBA16F textures:
 1. **Shallow-water layer** — water depth + velocity driven by the water
    surface slope and paper relief, with viscous drag and outward drift at the
    wash boundary (the "coffee ring" effect that makes edges dry darker).
-2. **Pigment layers** — 16 real pigments tracked individually, each as
+2. **Pigment layers** — 12 real pigments tracked individually, each as
    *suspended* (moving with the water) and *deposited* (settled on the sheet)
    concentration. Deposition/lifting uses Curtis' equations with each
    pigment's measured **density**, **staining power** and **granulation**.
@@ -112,30 +112,31 @@ which is exactly why it is a choice rather than the default.
 
 ## The workbench
 
-The UI mirrors a physical setup: a **palette of pans** along the bottom, a
-**ceramic mixing tray**, a **water glass** and a **sponge**. The brush is
-stateful — it carries water and a 16-pigment load:
+The UI mirrors a physical setup: a **paint box of 12 pans**, a **water
+glass** and a **sponge**. The brush is stateful — it carries water and a
+12-pigment load:
 
 - **Dip a pan** to pick up paint (a wet brush dissolves the pan and picks up
   far more than a dry one, which only scuffs colour off it).
-- **Mix on the plate**: the plate is a second instance of the full watercolor
-  simulation running on non-absorbent ceramic, moulded into eight **dished
-  wells with raised rims**. The rims matter: on a flat plate, water added to
-  thin a mix simply ran away across the surface while the pigment stayed
-  put, so the mix got *stronger* the more water you added. A well holds the
-  water in with the paint.
+- **Mix by parts.** Each tap on a pan adds one part to the recipe: tap yellow
+  seven times, black once, blue twice and the brush carries 7:1:2, shown as
+  a running readout. The Paint slider then says *how much* of that mixture is
+  on the hairs — ratio and quantity stay separate, the same split as water
+  and pigment. Every component keeps its own physics on the paper, so a mix
+  containing ultramarine still granulates and one containing quinacridone
+  still stains.
 
-  What the brush lifts off the plate is fluid, and what counts about that
-  fluid is its **concentration** — pigment per unit water — so adding clean
-  water genuinely thins what you pick up next. Leftover paint dries in the
-  well and re-wets later. **✕** rinses the segment.
+  This replaced a simulated ceramic mixing plate. The plate was a second
+  full instance of the watercolor simulation running every frame: 18% of all
+  the work done on an iPhone, and the reason the sheet could only afford 12
+  pigment channels once it was gone. Diluting a mix is now the Water and
+  Dilution sliders rather than a puddle.
+- **🌀 Rinse** empties the brush and clears the recipe — which is what
+  rinsing a brush means.
 - **💧 Water glass**: adds water to the brush and washes a little pigment off.
   Hold and swirl for more of both.
-- **🌀 Rinse**: the brush comes out with no colour *and* no water.
 - **🧽 Sponge**: blots water off the brush while keeping most of the pigment
   — the "thirsty brush" for dry-brush work and lifting.
-- Nothing refills mid-stroke: long strokes shed pigment first, then water,
-  and end in dry-brush texture.
 - **Paper picker**: Rough (the default) / Cold press / Hot press / Toned
   cream — different tooth, absorbency and tint (switching gives a fresh
   sheet).
@@ -195,8 +196,27 @@ cell including the name label, so the pans can stay short without becoming
 hard to hit. Occasional actions (Clear, Tilt, Demo, Save, Log, Reset) live
 in ⚙ rather than taking two rows of the bar.
 
+## Performance
+
+Two things cost power, and both are measured rather than guessed. On an iPad
+in landscape the simulation runs **729,000 cells** and the final image
+**3.9 million pixels**, every frame — about 294 million texture reads per
+frame in the old build. Three changes:
+
+- **Quality** (High / Balanced / Battery) sets the simulation grid and the
+  drawn resolution: 237M / 133M / 70M reads per frame. Balanced is the
+  default and roughly halves the work for a slightly softer paper grain.
+- **12 channels instead of 16** takes a quarter off every simulation step.
+- **Nothing is simulated when nothing is wet.** A dry, untouched sheet used
+  to run the whole pipeline forever — most of a session is spent looking
+  rather than painting. A 16×16 probe asks the GPU "is anything still wet?"
+  a few times a second and reads back 1KB; on a dry sheet the app now
+  simulates **0 frames out of 100**, and on a wet one 92 of 100.
+
 ## Settings (⚙)
 
+- **Quality** — simulation grid and drawn resolution. Drop to Battery if the
+  device gets warm.
 - **Drying speed** — 0.25×–4×: minutes of open wet-in-wet time, or set in
   seconds.
 - **Paint per dip** / **Water per dip** — how much one tap gives, on top of
@@ -214,10 +234,12 @@ in ⚙ rather than taking two rows of the bar.
 
 ## Paint box & channels
 
-The working palette is 8 pans chosen from the full paint box. Swapping a
-pan's paint binds a fresh simulation channel, so strokes already on paper
-keep the old paint's color and physics (16 channels total; heavy swapping
-in one sheet eventually recycles the oldest unused channel). Each paint is
+The working palette is 12 pans chosen from the full paint box, and a pan
+*is* a simulation channel — slot i always paints with channel i. Swapping a
+pan therefore recolours any earlier strokes made with the paint that left.
+An earlier build carried 16 channels so a swap could take a spare one and
+leave old strokes alone; that cost a quarter of every simulation step to
+protect a case the artist does not care about. Each paint is
 defined by mass tone + undertone colors (inverted to Kubelka-Munk K/S),
 tinting strength, density, staining, granulation strength, and granulation
 grain size (fine speckle vs coarse flocs).

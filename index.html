@@ -87,46 +87,38 @@
     margin: 0 auto;
   }
   #tools { flex: 0 0 auto; }
-  /* rotating mixing plate: 8 segments, one visible; ◀ ▶ turn the plate */
-  #traywrap {
-    position: relative;
+  /* the recipe, where the mixing plate used to be */
+  #mixbox {
     flex: 0 0 auto;
-    width: 190px;
-    height: 84px;
+    width: 168px;
+    min-height: 72px;
     border-radius: 10px;
+    background: rgba(255,255,255,0.07);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: flex-start;
+  }
+  #mixtitle { font-size: 10px; opacity: 0.5; letter-spacing: 0.08em; text-transform: uppercase; }
+  #mixreadout {
+    font-size: 11px; line-height: 1.35;
+    flex: 1 1 auto;
     overflow: hidden;
-    box-shadow: inset 0 2px 8px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.08);
-    background: #f4f4f2;
+    opacity: 0.95;
   }
-  #tray {
-    /* width = segment width x 8, set from JS so the plate follows the layout */
-    height: 84px;
-    touch-action: none;
-    transition: transform 0.25s ease;
-  }
-  .trayctl {
+  #mixbox .small { padding: 3px 7px; font-size: 10px; align-self: stretch; }
+  .panparts {
     position: absolute;
-    width: 22px; height: 22px;
-    border: none; border-radius: 50%;
-    background: rgba(60,60,60,0.55);
+    top: 2px; right: 3px;
+    font-size: 10px; font-weight: 600;
     color: #fff;
-    font-size: 12px; line-height: 22px;
-    cursor: pointer;
-    z-index: 2;
-    padding: 0;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+    display: none;
   }
-  #rinse { top: 3px; right: 3px; }
-  #segprev { bottom: 3px; left: 3px; }
-  #segnext { bottom: 3px; right: 3px; }
-  #seglabel {
-    position: absolute;
-    bottom: 6px; left: 50%;
-    transform: translateX(-50%);
-    font-size: 10px;
-    color: rgba(60,60,60,0.7);
-    z-index: 2;
-    pointer-events: none;
-  }
+  .panwrap.inmix .pan { outline: 2px solid rgba(255,255,255,0.75); }
+
   #tools {
     display: flex;
     flex-direction: row;
@@ -191,16 +183,13 @@
   button.small:active { background: rgba(255,255,255,0.28); }
   #palette {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 5px;
     flex: 1 1 auto;
     min-width: 0;
     align-content: center;
   }
-  /* one row of eight once there is room for it */
-  @media (min-width: 620px) {
-    #palette { grid-template-columns: repeat(8, 1fr); }
-  }
+  /* twelve pans, two rows of six, at every size */
   /* the whole wrapper is the tap target, label included — that buys back
      touch area without costing the bar any height */
   .panwrap {
@@ -211,6 +200,7 @@
     cursor: pointer;
   }
   .pan {
+    position: relative;
     aspect-ratio: 2.0;
     border-radius: 6px;
     border: 1px solid rgba(0,0,0,0.4);
@@ -340,17 +330,16 @@
        the same width, and eight across squeezed both the pans and the brush
        sliders down to slivers; stacked, the pans are the plate's own height
        and everything else gets room. */
-    #palette { grid-template-columns: repeat(4, 1fr); min-width: 200px; }
-    #brushrow { width: 340px; margin: 0; flex: 0 0 auto; }
-    #controls { width: 330px; margin: 0; flex: 0 0 auto; }
+    #palette { min-width: 280px; }
+    #brushrow { width: 330px; margin: 0; flex: 0 0 auto; }
+    #controls { width: 310px; margin: 0; flex: 0 0 auto; }
     .pan { aspect-ratio: 1.7; }
   }
   /* Phones: every row earns its height. The plate shrinks, the brush column
      fills what is left, and nothing wraps to a second line. */
   @media (max-width: 520px) {
     #toolbar { gap: 6px; padding: 7px 8px max(5px, var(--safe-bottom)); }
-    #traywrap { width: 132px; height: 74px; }
-    #tray { height: 74px; }
+    #mixbox { width: 124px; min-height: 66px; }
     .tool { height: 31px; font-size: 17px; }
     #palette { gap: 4px; }
     .pan { aspect-ratio: 1.7; border-radius: 5px; }
@@ -373,12 +362,10 @@
 <div id="err"></div>
 <div id="toolbar">
   <div id="workbench">
-    <div id="traywrap">
-      <canvas id="tray" title="Mixing plate: dab paints here and smear them with the brush"></canvas>
-      <button id="rinse" class="trayctl" title="Rinse this segment">✕</button>
-      <button id="segprev" class="trayctl" title="Turn plate left">◀</button>
-      <button id="segnext" class="trayctl" title="Turn plate right">▶</button>
-      <span id="seglabel">1/8</span>
+    <div id="mixbox">
+      <div id="mixtitle">Mix</div>
+      <div id="mixreadout">tap pans to build a mix</div>
+      <button id="mixclear" class="small" title="Clear the mix">Clear mix</button>
     </div>
     <div id="palette"></div>
   </div>
@@ -431,6 +418,13 @@
   </div>
   <div class="setnote" id="updnote"></div>
 
+  <div class="setrow"><span>Quality</span><select id="quality">
+    <option value="high">High — sharpest, warmest</option>
+    <option value="balanced" selected>Balanced</option>
+    <option value="battery">Battery — coolest</option>
+  </select></div>
+  <div class="setnote">How finely the water is simulated and how large the picture is drawn. On an iPad the simulation runs 729,000 cells and the picture 3.9 million pixels every frame at High; Balanced roughly halves both. Drop to Battery if the device gets warm.</div>
+
   <div class="setrow"><span>Drying speed</span><input id="drying" type="range" min="0" max="100" value="30"></div>
   <div class="setnote">How fast the sheet loses its shine. Left = minutes of open wet-in-wet time, right = sets in seconds.</div>
 
@@ -465,7 +459,7 @@
     <button id="demo" class="small">Demo</button>
     <button id="save" class="small" title="Export the painting as a PNG">Save</button>
     <button id="log" class="small" title="Export this session's strokes as JSON">Log</button>
-    <button id="reset" class="small" title="Clear painting, tray, palette and saved state">Reset</button>
+    <button id="reset" class="small" title="Clear the painting, palette and saved state">Reset</button>
   </div>
 
   <button id="setclose" style="align-self:center;padding:8px 22px;border:none;border-radius:9px;background:rgba(255,255,255,0.16);color:var(--panel-fg);font-size:14px;">Done</button>

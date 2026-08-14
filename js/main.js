@@ -1,40 +1,25 @@
-// UI wiring: physical painter's workbench.
+// UI wiring: painter's workbench.
 //
-// The brush is a stateful object carrying water + a 16-pigment load. You dip
-// it in pans (palette), mix on the ceramic tray (a second instance of the
-// full watercolor sim with zero absorbency), dip the water glass to dilute,
-// wipe it on the sponge, and paint. Nothing refills by itself: a stroke that
-// runs long goes dry-brush, exactly like the real thing.
+// The brush is a stateful object carrying water + a 12-pigment load. You dip
+// it in pans, dip the water glass to dilute, wipe it on the sponge, and
+// paint. Nothing refills by itself: a stroke that runs long goes dry-brush,
+// exactly like the real thing.
+//
+// Colours are mixed by PARTS on the pans rather than smeared together on a
+// simulated plate: tap yellow seven times, black once, blue twice and the
+// brush carries 7:1:2. The plate was a second full instance of the
+// simulation running every frame; on an iPhone it was 18% of all the work
+// done, and it is the reason twelve pigment channels now fit where sixteen
+// used to. Each pigment still keeps its own physics on the paper, so a mix
+// that contains ultramarine still granulates.
 
 'use strict';
 
 (() => {
   const canvas = document.getElementById('canvas');
-  const trayCanvas = document.getElementById('tray');
-  let sim, tray;
+  let sim;
   try {
     sim = new WatercolorSim(canvas);
-    tray = new WatercolorSim(trayCanvas, {
-      paper: 'ceramic',
-      maxSim: 1024, // the plate is 8 segments wide; keep per-segment detail
-      wells: 8,     // one dished well per segment, with a rim that holds water
-      params: {
-        evap: 0.000004,  // puddles in the tray last for ages
-        edgeEvap: 4.0,
-        maran: 0.5,
-        // Paint on a plate must stay dilutable: it barely settles, and what
-        // does settle re-dissolves the moment water reaches it. With the old
-        // low lift / high settle the pigment locked onto the ceramic and no
-        // amount of added water could thin the mix down.
-        lift: 0.4,
-        settle: 0.05,
-        pigDiff: 0.35,   // added water carries pigment through the puddle
-        // a puddle in a well levels out instead of standing in a heap, so
-        // added water actually spreads the colour thinner
-        grav: 14.0,
-        smooth: 0.15,
-      },
-    });
   } catch (e) {
     const err = document.getElementById('err');
     err.style.display = 'flex';
@@ -42,9 +27,7 @@
     throw e;
   }
   window.sim = sim; // for console tinkering / automated tests
-  window.tray = tray;
   LOGBOOK.attach(sim, 'paper');
-  LOGBOOK.attach(tray, 'tray');
 
   const NPIG = N_CHANNELS; // brush carries per-CHANNEL loads
 
@@ -171,7 +154,7 @@
       lastPt = { x: e.clientX, y: e.clientY };
       total = 1;
       try { el.setPointerCapture(e.pointerId); } catch { /* mouse w/o capture */ }
-      step(1);
+      step(1, true);
     });
     el.addEventListener('pointermove', (e) => {
       if (!active) return;
@@ -182,7 +165,7 @@
       // ~55px of swirling is worth another full dip
       const dose = Math.min(d, 30) / 55;
       total += dose;
-      step(dose);
+      step(dose, false);
     });
     const stop = () => {
       if (!active) return;
@@ -196,7 +179,60 @@
   // ------------------------------------------------------------ palette ---
   // Pans show the darkest possible mass tone (like real dried pans) with a
   // short name label to tell the dark ones apart.
+  //
+  // Mixing is by PARTS, which is how a recipe is actually held in the head:
+  // "seven yellow, one black, two blue". Each tap on a pan adds a part; the
+  // brush always carries the normalised mixture. Swirling on a pan loads
+  // more PAINT without changing the recipe, so quantity and ratio stay
+  // separate — the same split as water and pigment on the brush.
   const paletteEl = document.getElementById('palette');
+  const PARTS = new Float32Array(NPIG);
+  const mixEl = document.getElementById('mixreadout');
+  window.PARTS = PARTS;
+
+  function partsTotal() {
+    let t = 0;
+    for (let i = 0; i < NPIG; i++) t += PARTS[i];
+    return t;
+  }
+
+  // Restate the brush's pigment as the recipe, keeping however much paint is
+  // already on it (or a starting dose if it was empty).
+  function applyMix(load) {
+    const tot = partsTotal();
+    if (tot <= 0) { brush.pig.fill(0); return; }
+    const amount = load != null ? load : Math.max(brushTotal(), SET.pickup * 0.6);
+    for (let i = 0; i < NPIG; i++) brush.pig[i] = (PARTS[i] / tot) * amount;
+  }
+
+  function mixText() {
+    const tot = partsTotal();
+    if (tot <= 0) return '';
+    return PANS.map((pan, i) => (PARTS[i] > 0 ? `${Math.round(PARTS[i])} ${pan.paint.short}` : null))
+      .filter(Boolean).join(' : ');
+  }
+
+  function refreshParts() {
+    const tot = partsTotal();
+    [...paletteEl.querySelectorAll('.panwrap')].forEach((wrap, i) => {
+      const badge = wrap.querySelector('.panparts');
+      if (!badge) return;
+      badge.textContent = PARTS[i] > 0 ? String(Math.round(PARTS[i])) : '';
+      badge.style.display = PARTS[i] > 0 ? 'block' : 'none';
+      wrap.classList.toggle('inmix', PARTS[i] > 0);
+    });
+    if (mixEl) mixEl.textContent = tot > 0 ? mixText() : 'tap pans to build a mix';
+  }
+  window.__refreshParts = refreshParts;
+
+  function clearMix(msg = 'Mix cleared') {
+    PARTS.fill(0);
+    brush.pig.fill(0);
+    refreshParts();
+    LOGBOOK.log('mixClear');
+    updateBrushView(msg);
+  }
+  document.getElementById('mixclear').addEventListener('click', () => clearMix());
 
   function rebuildPans() {
     paletteEl.innerHTML = '';
@@ -207,33 +243,39 @@
       const b = document.createElement('button');
       b.className = 'pan';
       b.style.background = p.swatch;
-      b.title = `${p.name} (${p.ci}) — press and swirl to keep loading`;
+      b.title = `${p.name} (${p.ci}) — tap to add a part, press and swirl for more paint`;
+      const badge = document.createElement('div');
+      badge.className = 'panparts';
       const label = document.createElement('div');
       label.className = 'panlabel';
       label.textContent = p.short;
+      b.appendChild(badge);
       wrap.appendChild(b);
       wrap.appendChild(label);
       // The tap target is the whole wrapper, name label included. The pans
       // are short so the bar stays out of the way, and this buys the touch
       // area back without costing any height.
-      swirl(wrap, (dose) => {
+      swirl(wrap, (dose, first) => {
+        if (first) PARTS[i] += 1; // one tap, one part
         // a wet brush dissolves the hard pan and picks up a lot; a dry one
         // only scuffs a little colour off it
-        const chan = PANS[i].chan;
         const pickup = (0.25 + 0.75 * brush.water) * SET.pickup * dose;
-        brush.pig[chan] = Math.min(PIG_CAP, brush.pig[chan] + pickup);
+        applyMix(Math.min(PIG_CAP, brushTotal() + pickup));
         brush.water = Math.max(brush.water - 0.05 * dose, 0);
-        updateBrushView(`${PANS[i].paint.name} (${PANS[i].paint.ci}) — ${consistency()}`);
+        if (first) refreshParts();
+        updateBrushView(`${mixText()} — ${consistency()}`);
       }, (total) => {
         LOGBOOK.log('dipPan', {
-          pig: PANS[i].chan, name: PANS[i].paint.name,
+          pig: i, name: PANS[i].paint.name,
           doses: Math.round(total * 100) / 100,
-          load: Math.round(brush.pig[PANS[i].chan] * 100) / 100,
+          parts: Math.round(PARTS[i]),
+          mix: mixText(),
           water: Math.round(brush.water * 100) / 100,
         });
       });
       paletteEl.appendChild(wrap);
     });
+    refreshParts();
   }
   rebuildPans();
   window.__refreshPalette = rebuildPans;
@@ -257,8 +299,10 @@
     // next starts from a genuinely empty brush.
     brush.pig.fill(0);
     brush.water = 0;
+    PARTS.fill(0);
+    refreshParts();
     LOGBOOK.log('clean');
-    updateBrushView('Brush clean — no colour, no water');
+    updateBrushView('Brush clean — no colour, no water, no mix');
   });
 
   // Sponge: sheds water, keeps most of the pigment (the "thirsty brush" for
@@ -373,6 +417,15 @@
   const depleteEl = document.getElementById('deplete');
   const tiltStrEl = document.getElementById('tiltstrength');
   const pressRangeEl = document.getElementById('pressrange');
+  const qualityEl = document.getElementById('quality');
+
+  // The two knobs that actually cost power, measured on an iPad in
+  // landscape: simulation cells and drawn pixels.
+  const QUALITY = {
+    high:     { maxSim: 1024, dpr: 3.0 },
+    balanced: { maxSim: 768,  dpr: 1.5 },
+    battery:  { maxSim: 576,  dpr: 1.0 },
+  };
 
   // Drying speed: slider 0..100 -> 0.25x .. 4x around the base rate, so the
   // sheet can be kept open for minutes or pushed to dry in seconds.
@@ -390,14 +443,15 @@
     SET.deplete = depleteEl.checked;
     SET.tiltStrength = (Number(tiltStrEl.value) / 100) * 2;
     SET.pressRange = Number(pressRangeEl.value) / 100;
+    const q = QUALITY[qualityEl.value] || QUALITY.balanced;
+    sim.setQuality(q.maxSim, q.dpr);
     sim.params.saltGrain = SET.saltGrain;
     // sparser as the crystals get bigger, so grains never merge into a mat
     sim.params.saltSpacing = 4.0 + SET.saltGrain * 2.4;
     sim.setFlow(SET.runoff);
-    tray.setFlow(true); // the plate always flows: that's how mixing works
     if (log) LOGBOOK.log('settings', { ...SET });
   }
-  for (const el of [pickupEl, waterdipEl, saltsizeEl, runoffEl, pressEl, depleteEl, tiltStrEl, pressRangeEl]) {
+  for (const el of [pickupEl, waterdipEl, saltsizeEl, runoffEl, pressEl, depleteEl, tiltStrEl, pressRangeEl, qualityEl]) {
     el.addEventListener('input', () => applySettings());
   }
   dryingEl.addEventListener('input', () => applyDrying());
@@ -485,6 +539,7 @@
 
   paperSel.addEventListener('change', () => {
     sim.setPaper(paperSel.value);
+    sim.markDirty();
     LOGBOOK.log('paper', { name: paperSel.value });
     updateBrushView(`${PAPERS[paperSel.value].label} paper (fresh sheet)`);
   });
@@ -522,6 +577,7 @@
     const sy = -gx * s + gy * c;
     const k = 0.25 * SET.tiltStrength;
     sim.params.tilt = [sx * k, -sy * k];
+    if (Math.abs(sx) + Math.abs(sy) > 0.01) sim.markDirty();
     window.__tiltDebug = { beta: e.beta, gamma: e.gamma, dBeta, dGamma,
                            angleDeg: (a * 180) / Math.PI, tilt: sim.params.tilt };
   }
@@ -587,6 +643,7 @@
     if (sim.pushUndo()) LOGBOOK.log('snap');
   }
   document.getElementById('undo').addEventListener('click', () => {
+    sim.markDirty();
     if (sim.undo()) {
       LOGBOOK.log('undo');
       updateBrushView(`Undone — ${sim.undoCount} step${sim.undoCount === 1 ? '' : 's'} left`);
@@ -598,6 +655,7 @@
   const wetviewBtn = document.getElementById('wetview');
   wetviewBtn.addEventListener('click', () => {
     sim.wetView = !sim.wetView;
+    sim.markDirty(); // the picture changes even though the water does not
     wetviewBtn.style.background = sim.wetView ? 'rgba(120,180,255,0.35)' : '';
     updateBrushView(sim.wetView ? 'Wetness view: blue=wet, teal=satin, amber=damp' : undefined);
   });
@@ -773,158 +831,6 @@
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
 
-  // ------------------------------------------------------ mixing: tray ----
-  const trayPig = new Float32Array(NPIG);
-  let mixing = false;
-  let trayLast = null;
-  let lastPickup = 0;
-
-  // Water pickup is only allowed when the puddle existed BEFORE this stroke:
-  // otherwise the brush would re-absorb the water it just deposited and get
-  // wetter by merely touching a dry tray.
-  let strokeHadPuddle = false;
-
-  // Mixing is an EXCHANGE, and it has to balance both ways.
-  //
-  // The first version shed 30% of the brush's load onto the plate per dab
-  // while taking only 1.5% off the brush, and picked colour back up without
-  // removing any — so every pass round the loop multiplied the pigment on
-  // the plate. Smearing to dilute a mix made it darker and darker.
-  //
-  // Now: whatever the brush sheds it loses, and whatever it lifts is
-  // scrubbed off the plate. Brush and puddle settle toward the same
-  // concentration, exactly as they do on a real palette.
-  const GIVE = 0.22; // fraction of the load shed per dab
-  const TAKE = 0.30; // fraction of the load exchanged for local fluid
-  // set by a pickup, consumed by the next dab: the fluid the brush lifted
-  // has to come off the plate, or pigment is created out of nothing
-  let pendingScrub = 0;
-
-  function trayDab(x, y) {
-    // Same two-axis rule as the paper: a dry brush loaded with paint leaves
-    // thick paint on the plate and adds NO water to it.
-    const water = 0.05 * brush.water;
-    for (let i = 0; i < NPIG; i++) trayPig[i] = brush.pig[i] * GIVE * 1.4;
-    tray.splat(x, y, SEGW * 0.058, water, trayPig, brush.water, pendingScrub);
-    pendingScrub = 0;
-    for (let i = 0; i < NPIG; i++) brush.pig[i] *= 1 - GIVE;
-    brush.water *= 0.95;
-  }
-
-  // What the brush lifts off the plate is FLUID, and what matters about that
-  // fluid is its CONCENTRATION — pigment per unit of water — not the raw
-  // amount of pigment sitting there.
-  //
-  // The first version blended raw pigment amounts, which made dilution
-  // impossible: a rinsed brush touched a strong puddle, instantly reloaded
-  // to full strength, and put that pigment straight back down. However much
-  // water you added, the brush just shuttled the same paint around. (The
-  // session log shows it exactly: a brush at 0.00 pigment reading 0.10 one
-  // frame later and 0.21 a few frames after that.)
-  //
-  // Sampling the ratio instead means adding water genuinely thins the mix:
-  // more water under the brush -> lower concentration -> paler pickup, and
-  // the pale pickup is what gets laid down next.
-  function trayPickup(x, y) {
-    const now = performance.now();
-    if (now - lastPickup < 60) return;
-    lastPickup = now;
-    const m = tray.readMix(x, y);
-    let pigSum = 0;
-    for (let i = 0; i < NPIG; i++) pigSum += m.pig[i];
-    // Concentration of the fluid under the brush. The 22 weights water
-    // against pigment in the sim's own units (measured: thick paint on the
-    // plate sits near pig 2.9 / water 0.19, the same paint well watered
-    // down near pig 2.5 / water 0.78 — a 5x change in ratio that the naive
-    // pigment-only reading threw away entirely).
-    const conc = pigSum / (pigSum + 22 * m.water + 0.02);
-    const strength = Math.min(1, conc / 0.45); // 0.45 == a fully loaded brush
-    if (pigSum > 0.01) {
-      for (let i = 0; i < NPIG; i++) {
-        const target = (m.pig[i] / pigSum) * strength * PIG_CAP;
-        brush.pig[i] = brush.pig[i] * (1 - TAKE) + target * TAKE;
-      }
-      pendingScrub = TAKE * 0.5; // that fluid leaves the plate with the brush
-    } else if (m.water > 0.02) {
-      // clean water under the brush thins whatever it is carrying
-      for (let i = 0; i < NPIG; i++) brush.pig[i] *= 1 - TAKE * 0.6;
-    }
-    // water is taken up separately, and only from a puddle that was already
-    // there — otherwise the brush re-absorbs the water it just laid down
-    if (strokeHadPuddle && m.water > 0.02) {
-      brush.water = Math.min(1, Math.max(brush.water, Math.min(m.water * 4, 0.9)));
-    }
-    updateBrushView(`Mixing — ${consistency()}`);
-  }
-
-  // ------------------------------------------------ rotating plate --------
-  // The tray canvas is 8 segments wide; the wrap clips to one. ◀ ▶ "turn"
-  // the plate; each segment keeps its own mixes (and dries independently).
-  const NSEG = 8;
-  let SEGW = 190;
-  let seg = 0;
-  const segLabel = document.getElementById('seglabel');
-
-  // The visible window is one segment wide, whatever the layout gives it
-  // (narrower on a phone, wider on a landscape iPad), so measure it rather
-  // than assuming.
-  function layoutTray() {
-    const w = document.getElementById('traywrap').clientWidth || 190;
-    if (Math.abs(w - SEGW) < 1) return;
-    SEGW = w;
-    trayCanvas.style.width = `${SEGW * NSEG}px`;
-    tray.resize();
-    setSeg(seg, false);
-  }
-
-  function setSeg(n, log = true) {
-    seg = ((n % NSEG) + NSEG) % NSEG;
-    trayCanvas.style.transform = `translateX(${-seg * SEGW}px)`;
-    segLabel.textContent = `${seg + 1}/${NSEG}`;
-    if (log) LOGBOOK.log('traySeg', { seg });
-  }
-  layoutTray();
-  document.getElementById('segprev').addEventListener('click', () => setSeg(seg - 1));
-  document.getElementById('segnext').addEventListener('click', () => setSeg(seg + 1));
-
-  // Rinsing the plate is the ✕ button only. Double-tap-to-rinse was too easy
-  // to trigger by accident while dabbing, and wiped a mix mid-mix.
-  function rinseTray(msg = 'Segment rinsed') {
-    tray.clearRegion(seg * SEGW, (seg + 1) * SEGW);
-    LOGBOOK.log('trayRinse', { seg, w: SEGW });
-    updateBrushView(msg);
-  }
-  document.getElementById('rinse').addEventListener('click', () => rinseTray());
-
-  trayCanvas.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    trayCanvas.setPointerCapture(e.pointerId);
-    mixing = true;
-    trayLast = null;
-    // sample the tray before touching it: was there already a puddle here?
-    const pre = tray.readMix(e.offsetX, e.offsetY);
-    strokeHadPuddle = pre.water > 0.015;
-    trayDab(e.offsetX, e.offsetY);
-    trayPickup(e.offsetX, e.offsetY);
-  });
-  trayCanvas.addEventListener('pointermove', (e) => {
-    if (!mixing) return;
-    e.preventDefault();
-    if (trayLast) {
-      const dist = Math.hypot(e.offsetX - trayLast.x, e.offsetY - trayLast.y);
-      const n = Math.max(1, Math.floor(dist / 5));
-      for (let i = 1; i <= n; i++) {
-        trayDab(trayLast.x + ((e.offsetX - trayLast.x) * i) / n,
-                trayLast.y + ((e.offsetY - trayLast.y) * i) / n);
-      }
-    }
-    trayLast = { x: e.offsetX, y: e.offsetY };
-    trayPickup(e.offsetX, e.offsetY);
-  });
-  const trayEnd = () => { mixing = false; trayLast = null; updateBrushView(); };
-  trayCanvas.addEventListener('pointerup', trayEnd);
-  trayCanvas.addEventListener('pointercancel', trayEnd);
-
   // -------------------------------------------------- persistence / PWA ---
   // Snapshots the dried painting + workbench state; wet paint "dries"
   // across reloads like a real sheet left overnight.
@@ -936,7 +842,6 @@
     saving = true;
     try {
       const snap = sim.readDeposits();
-      const traySnap = tray.readDeposits();
       await STORE.put('state', {
         v: 1,
         savedAt: Date.now(),
@@ -944,16 +849,16 @@
         channels: CHANNELS.map((c) => (c ? c.id : null)),
         pans: PANS.map((p) => ({ id: p.paint.id, chan: p.chan })),
         brush: { water: brush.water, pig: Array.from(brush.pig) },
-        seg,
+        parts: Array.from(PARTS),
         drying: Number(dryingEl.value),
         settings: {
           pickup: Number(pickupEl.value), waterdip: Number(waterdipEl.value),
           saltsize: Number(saltsizeEl.value), runoff: runoffEl.checked,
           presssize: pressEl.checked, deplete: depleteEl.checked,
           tiltstrength: Number(tiltStrEl.value), pressrange: Number(pressRangeEl.value),
+          quality: qualityEl.value,
         },
         painting: snap,
-        tray: traySnap,
         log: LOGBOOK.export({ paper: sim.paperName }),
       });
       lastSavedFrame = LOGBOOK.frame;
@@ -972,12 +877,11 @@
         sim.setPaper(st.paper.name, st.paper.seed);
       }
       if (st.painting) sim.writeDeposits(st.painting);
-      if (st.tray) tray.writeDeposits(st.tray);
       if (st.brush) {
         brush.water = st.brush.water;
         brush.pig.set(st.brush.pig.slice(0, NPIG));
       }
-      if (st.seg != null) setSeg(st.seg);
+      if (st.parts) { PARTS.set(st.parts.slice(0, NPIG)); refreshParts(); }
       if (st.drying != null) { dryingEl.value = st.drying; applyDrying(false); }
       if (st.settings) {
         const s = st.settings;
@@ -989,6 +893,7 @@
         if (s.deplete != null) depleteEl.checked = s.deplete;
         if (s.tiltstrength != null) tiltStrEl.value = s.tiltstrength;
         if (s.pressrange != null) pressRangeEl.value = s.pressrange;
+        if (s.quality) qualityEl.value = s.quality;
         applySettings(false);
       }
       if (st.log) LOGBOOK.restore(st.log);
@@ -1004,7 +909,7 @@
   });
 
   document.getElementById('reset').addEventListener('click', async () => {
-    if (!window.confirm('Reset everything? This clears the painting, tray, palette and saved state.')) return;
+    if (!window.confirm('Reset everything? This clears the painting, palette and saved state.')) return;
     await STORE.clear();
     LOGBOOK.reset();
     location.reload();
@@ -1015,10 +920,8 @@
   }
 
   // --------------------------------------------------------------- loop ---
-  window.addEventListener('resize', () => { sim.resize(); layoutTray(); tray.resize(); });
-  window.addEventListener('orientationchange', () => setTimeout(() => {
-    sim.resize(); layoutTray(); tray.resize();
-  }, 250));
+  window.addEventListener('resize', () => sim.resize());
+  window.addEventListener('orientationchange', () => setTimeout(() => sim.resize(), 250));
 
   function frame() {
     if (!window.__PAUSED) {
@@ -1033,10 +936,13 @@
           dx: Math.round(drying_.dx * 100) / 100, dy: Math.round(drying_.dy * 100) / 100,
         });
       }
-      sim.step();
-      sim.render();
-      tray.step();
-      tray.render();
+      // A dry, untouched sheet has nothing to compute and nothing new to
+      // draw — and the canvas keeps its last frame — so on an idle sheet
+      // this costs nothing at all.
+      if (sim.needsStep()) {
+        sim.step();
+        sim.render();
+      }
     }
     requestAnimationFrame(frame);
   }

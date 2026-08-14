@@ -1,11 +1,8 @@
 // Paint definitions with Kubelka-Munk absorption (K) and scattering (S).
 //
 // PAINTBOX  - the artist's full collection (from their hand-painted wheel).
-// CHANNELS  - 16 simulation channels (4 RGBA texture pairs). Each channel is
-//             bound to one paint. Pans reference channels; swapping a pan's
-//             paint allocates a NEW channel, so strokes already on paper
-//             keep the old paint's identity and color.
-// PANS      - the 8 working pans: { paint, chan }.
+// CHANNELS  - 12 simulation channels (3 RGBA texture pairs), one per pan.
+// PANS      - the 12 working pans: { paint, chan }, where chan === slot.
 //
 // Per paint:
 //   w, b   - mass tone over white / undertone over black -> K,S via the
@@ -23,7 +20,13 @@
 
 'use strict';
 
-const PIG_TEXTURES = 4;
+// Three RGBA textures = 12 pigment channels, and there are 12 pans, so a pan
+// IS a channel — slot i always paints with channel i. The old build carried
+// 16 channels so that swapping a pan could allocate a spare one and leave
+// earlier strokes untouched; that cost a quarter of every simulation step
+// for a case the artist does not care about. Swapping now recolours any
+// earlier strokes made with the paint that left.
+const PIG_TEXTURES = 3;
 const N_CHANNELS = PIG_TEXTURES * 4;
 
 const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
@@ -151,35 +154,32 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
 
   const pans = [];
 
-  // Bind a paint to a pan. Reuses the paint's existing channel if it already
-  // has one (strokes match); otherwise takes a free channel; as a last
-  // resort recycles the oldest channel no pan references (its old strokes
-  // would recolor — with 16 channels and 8 pans that needs 8+ swaps).
+  // Bind a paint to a pan. Slot i owns channel i, full stop.
   function assign(slot, paintId) {
     const paint = box[paintId];
-    let chan = channels.findIndex((c) => c && c.id === paintId);
-    if (chan < 0) chan = channels.findIndex((c) => c === null);
-    if (chan < 0) {
-      const used = new Set(pans.map((p) => p.chan));
-      chan = channels.findIndex((_, i) => !used.has(i));
-      if (chan < 0) chan = 0;
-    }
-    channels[chan] = paint;
-    pans[slot] = { paint, chan };
+    channels[slot] = paint;
+    pans[slot] = { paint, chan: slot };
     channels.version++;
   }
 
-  // Restore exact channel/pan bindings from a persisted session.
+  // Restore pan bindings from a persisted session. Sessions saved by older
+  // builds carry 16 channels and their own pan->channel map; only the first
+  // N_CHANNELS pans can be honoured, and each is re-seated on its own slot.
   function restore(channelIds, panList) {
     channels.fill(null);
-    channelIds.forEach((id, i) => { if (id != null && box[id]) channels[i] = box[id]; });
-    pans.length = 0;
-    panList.forEach((p, slot) => { pans[slot] = { paint: box[p.id], chan: p.chan }; });
+    (panList || []).slice(0, N_CHANNELS).forEach((p, slot) => {
+      const paint = box[p.id];
+      if (!paint) return;
+      channels[slot] = paint;
+      pans[slot] = { paint, chan: slot };
+    });
     channels.version++;
   }
 
-  // default working palette (artist will finalize later)
-  ['Lemon', 'Irgazin', 'B. Siena', 'Q. Pink', 'Ultram.', 'Prussian', 'C. Turq', 'Emerald']
+  // default working palette of twelve (artist will finalize later)
+  ['Lemon', 'Irgazin', 'Raw Sien', 'B. Siena',
+   'Carmine', 'Q. Pink', 'Diox.', 'Ultram.',
+   'Cobalt', 'Prussian', 'C. Turq', 'Emerald']
     .forEach((short, slot) => assign(slot, box.findIndex((p) => p.short === short)));
 
   return { PAINTBOX: box, CHANNELS: channels, PANS: pans, assignPan: assign, restoreBindings: restore };

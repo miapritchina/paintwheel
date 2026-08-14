@@ -711,6 +711,35 @@ void main() {
   oSat = s;
 }`;
 
+// ---------------------------------------------------------------- probe ----
+// "Is anything still wet?", answered on the GPU and read back as one small
+// byte buffer. The app used to run the whole pipeline every frame forever,
+// including on a bone-dry sheet — most of a painting session is spent
+// looking rather than painting, and all of that was full-rate work.
+//
+// Each output texel scans a PROBE_N x PROBE_N block of the sheet and reports
+// whether any of it holds free water or damp paper. A 16x16 target is 1KB to
+// read back, cheap enough to poll a couple of times a second.
+SHADERS.probe = `#version 300 es
+${COMMON}
+uniform sampler2D uFlow;
+uniform sampler2D uSat;
+uniform vec2 uBlock;   // size of the region each texel covers, in UV
+out vec4 frag;
+
+void main() {
+  vec2 base = floor(vUV / uBlock) * uBlock;
+  float wet = 0.0;
+  for (int j = 0; j < 6; j++) {
+    for (int i = 0; i < 6; i++) {
+      vec2 uv = base + uBlock * (vec2(float(i), float(j)) + 0.5) / 6.0;
+      wet = max(wet, texture(uFlow, uv).x * 400.0);
+      wet = max(wet, texture(uSat, uv).x * 12.0);
+    }
+  }
+  frag = vec4(clamp(wet, 0.0, 1.0));
+}`;
+
 // ---------------------------------------------------------------- clear ----
 SHADERS.clear = `#version 300 es
 ${COMMON}

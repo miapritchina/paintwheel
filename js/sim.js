@@ -21,6 +21,7 @@ class WatercolorSim {
     this.paperName = opts.paper || 'rough';
     this.paper = PAPERS[this.paperName];
     this.maxSim = opts.maxSim || 1024;
+    this.dprCap = opts.dprCap || 3;
     this.wells = opts.wells || 0; // dished wells across the width (palette)
     const gl = canvas.getContext('webgl2', {
       alpha: false,
@@ -144,7 +145,7 @@ class WatercolorSim {
 
   _initPrograms() {
     this.progs = {};
-    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'dryer', 'clear', 'copy']) {
+    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'dryer', 'probe', 'clear', 'copy']) {
       this.progs[name] = this._program(name, SHADERS[name]);
     }
   }
@@ -171,9 +172,21 @@ class WatercolorSim {
   }
 
   // ------------------------------------------------------------- sizing ---
+  // Quality: the two knobs that actually cost power. `maxSim` sets how many
+  // cells the physics runs on, `dprCap` how many fragments the final image
+  // is drawn at — measured at 729k cells and 3.9M fragments on an iPad in
+  // landscape, which is where the heat came from.
+  setQuality(maxSim, dprCap) {
+    if (this.maxSim === maxSim && this.dprCap === dprCap) return;
+    this.maxSim = maxSim;
+    this.dprCap = dprCap;
+    this.simW = -1; // force the textures to be rebuilt at the new size
+    this.resize();
+  }
+
   resize() {
     const gl = this.gl;
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const dpr = Math.min(window.devicePixelRatio || 1, this.dprCap || 3);
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
     this.canvas.width = Math.round(cssW * dpr);
@@ -199,6 +212,7 @@ class WatercolorSim {
       this.dep.push(this._makePair(w, h));
     }
     this.clearUndo();
+    if (this.probeTex) { gl.deleteTexture(this.probeTex); this.probeTex = null; }
     if (this.paperTex) gl.deleteTexture(this.paperTex);
     this.paperTex = this._makeTexture(w, h);
     if (!this.fbo) this.fbo = gl.createFramebuffer();
@@ -234,7 +248,11 @@ class WatercolorSim {
   }
 
   writeDeposits(snap) {
-    if (!snap || !snap.layers || snap.layers.length !== PIG_TEXTURES) return;
+    if (!snap || !snap.layers) return;
+    // a snapshot from a 16-channel session carries four layers; take the
+    // first three, which are the twelve channels that still exist
+    if (snap.layers.length < PIG_TEXTURES) return;
+    this.markDirty();
     const gl = this.gl;
     const tmpTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tmpTex);
@@ -255,6 +273,61 @@ class WatercolorSim {
       this.dep[i].swap();
     }
     gl.deleteTexture(tmpTex);
+  }
+
+  // ----------------------------------------------------------------- idle --
+  // Nothing on the sheet moves once the paper is dry, so there is no reason
+  // to keep running the pipeline — and most of a painting session is spent
+  // looking at the sheet rather than touching it. anythingWet() answers the
+  // question on the GPU and reads back 16x16 bytes, cheap enough to ask a
+  // few times a second; markDirty() covers everything that could have made
+  // the sheet wet since the last check.
+  markDirty() {
+    this._dirtyUntil = (this._frames || 0) + 90; // keep running for a moment
+  }
+
+  anythingWet() {
+    const gl = this.gl;
+    const N = 16;
+    if (!this.probeTex) {
+      this.probeTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.probeTex);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, N, N);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      this._probeBuf = new Uint8Array(N * N * 4);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.probeTex, 0);
+    for (let i = 1; i < PIG_TEXTURES + 1; i++) {
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, null, 0);
+    }
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    gl.viewport(0, 0, N, N);
+    const p = this._use('probe', [['uFlow', this.flow.read], ['uSat', this.sat.read]]);
+    gl.uniform2f(p.uniforms.uBlock, 1 / N, 1 / N);
+    this._draw();
+    let wet = false;
+    try {
+      gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, this._probeBuf);
+      for (let i = 0; i < this._probeBuf.length; i += 4) {
+        if (this._probeBuf[i] > 2) { wet = true; break; }
+      }
+    } catch (e) {
+      wet = true; // if the readback fails, keep simulating rather than freeze
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return wet;
+  }
+
+  // Should this frame be simulated at all?
+  needsStep() {
+    this._frames = (this._frames || 0) + 1;
+    if (this._frames < (this._dirtyUntil || 0)) return true;
+    // re-ask a few times a second rather than every frame
+    if (this._frames % 20 !== 0) return this._wasWet !== false;
+    this._wasWet = this.anythingWet();
+    return this._wasWet;
   }
 
   // ----------------------------------------------------------------- undo --
@@ -322,6 +395,7 @@ class WatercolorSim {
   }
 
   undo() {
+    this.markDirty();
     const u = this._undo;
     if (!u || !u.stack.length) return false;
     const slot = u.stack.pop();
@@ -382,6 +456,7 @@ class WatercolorSim {
 
   // --------------------------------------------------------------- state --
   clearAll() {
+    this.markDirty();
     const gl = this.gl;
     const pairs = [this.flow, this.sat, ...this.susp, ...this.dep];
     for (const pair of pairs) {
@@ -478,6 +553,7 @@ class WatercolorSim {
   // --------------------------------------------------------------- brush --
   // pig: Float32Array(16) of pigment amounts; water in [0..~0.1]
   splat(xCss, yCss, radiusCss, water, pig, wetness, scrub = 0) {
+    this.markDirty();
     const gl = this.gl;
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
@@ -626,6 +702,7 @@ class WatercolorSim {
   // Sprinkle salt into the wash: grains soak water and shove pigment into
   // starbursts while the paper is in the damp band.
   sprinkleSalt(xCss, yCss, radiusCss) {
+    this.markDirty();
     const gl = this.gl;
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
@@ -646,6 +723,7 @@ class WatercolorSim {
   // the air is travelling across the paper (from the stroke), so dragging
   // the nozzle blows the wet film along with it.
   blowDry(xCss, yCss, radiusCss, dirX = 0, dirY = 0, power = 1.0) {
+    this.markDirty();
     const gl = this.gl;
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;

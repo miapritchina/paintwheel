@@ -107,7 +107,6 @@ const REPLAY = (() => {
       LOGBOOK.muted = true;
       if (s.paper && window.sim) sim.setPaper(s.paper);
       if (window.sim) sim.clearAll();
-      if (window.tray) tray.clearAll();
       return s;
     },
     get active() { return queue !== null && idx < queue.length; },
@@ -119,7 +118,9 @@ const REPLAY = (() => {
       }
       while (idx < queue.length && queue[idx].f <= f) {
         const e = queue[idx++];
-        const target = e.on === 'tray' ? window.tray : window.sim;
+        // 'tray' events come from sessions recorded before the mixing plate
+        // was removed; there is nothing to replay them onto
+        const target = e.on === 'tray' ? null : window.sim;
         if (e.t === 'splat' && target) {
           const pig = new Float32Array(N_CHANNELS);
           for (const [k, v] of Object.entries(e.pig || {})) pig[+k] = v;
@@ -128,11 +129,6 @@ const REPLAY = (() => {
         else if (e.t === 'palette') {
           assignPan(e.slot, e.id);
           if (window.__refreshPalette) window.__refreshPalette();
-        }
-        else if (e.t === 'trayRinse' && window.tray) {
-          const sw = e.w || 190; // segment width varies with the layout
-          if (e.seg != null) tray.clearRegion(e.seg * sw, (e.seg + 1) * sw);
-          else tray.clearAll();
         }
         else if (e.t === 'paper' && window.sim) sim.setPaper(e.name);
         else if (e.t === 'snap' && window.sim) sim.pushUndo();
