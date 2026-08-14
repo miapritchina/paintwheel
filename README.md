@@ -127,12 +127,10 @@ glass** and a **sponge**. The brush is stateful — it carries water and a
   to correct one part is not that. The Paint slider then says *how much*
   of that mixture is on the hairs, so ratio and quantity stay separate.
 
-  What the brush holds is shown as **paint rather than as a sentence**: a
-  wide swatch running from the mixture at its current load on the left to a
-  thin wash on the right, the same ramp the paint box uses for a single
-  pigment. The recipe itself is already legible on the pans, which carry
-  their own part counts. Water is deliberately absent from the preview —
-  water decides how far a stroke spreads, not how strong its colour is. Every component keeps its own physics on the paper, so a mix
+  Nothing sits beside the pans reporting the mix — not a readout, not a
+  preview swatch. The pans carry their own part counts and the status line
+  names the recipe as it changes, so a panel restating it was one more thing
+  in the bar earning nothing. The row is the pans, and they get all of it. Every component keeps its own physics on the paper, so a mix
   containing ultramarine still granulates and one containing quinacridone
   still stains.
 

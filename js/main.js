@@ -75,7 +75,6 @@
     for (let i = 0; i < NPIG; i++) brush.pig[i] *= k;
   }
 
-  const brushPreview = document.getElementById('brushpreview');
   const brushcursor = document.getElementById('brushcursor');
   const pignameEl = document.getElementById('pigname');
   const consistencyEl = document.getElementById('consistency');
@@ -107,26 +106,10 @@
     updateBrushView(`Water ${waterSl.value}%`);
   });
 
-  // The brush shown as paint: the mixture at the load it is actually
-  // carrying on the left, thinning away to the right — the same ramp the
-  // paint box uses for a pigment, so the two read alike. Water is
-  // deliberately absent from it: water decides how far a stroke spreads,
-  // not how strong its colour is, and the preview should not imply
-  // otherwise.
-  function previewRamp(total) {
-    if (total <= 0.01) return null;
-    const depth = 16 * Math.min(total / PIG_CAP, 1);
-    return [1.0, 0.5, 0.22, 0.09, 0.035]
-      .map((f) => CHANNELS.kmColor(brush.pig, Math.max(depth * f, 0.02)));
-  }
-
   function updateBrushView(msg) {
     const total = brushTotal();
+    // the colour still drives the brush cursor on the paper
     const color = total > 0.01 ? CHANNELS.kmColor(brush.pig, 1.5 + 12 * Math.min(total, 1.2)) : 'rgb(238,236,230)';
-    const ramp = previewRamp(total);
-    brushPreview.style.background = ramp
-      ? `linear-gradient(100deg, ${ramp.join(', ')})`
-      : '#efece6';
     // the sliders double as the level meters: writing them back keeps the
     // display honest whichever way the brush was changed (dip, swirl, stroke)
     sliderEcho = true;

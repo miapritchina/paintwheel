@@ -67,11 +67,18 @@
     gap: 7px;
     z-index: 10;
   }
+  /* the pans, and nothing else — the row used to share its width with a
+     mixing plate, then a recipe readout, then a preview swatch */
   #workbench {
     display: flex;
     gap: 8px;
     align-items: flex-start;
     justify-content: center;
+    /* capped, or twelve pans across the whole bar grow tall enough to cost
+       more height than the box they replaced */
+    max-width: 420px;
+    width: 100%;
+    margin: 0 auto;
   }
   /* Everything right of the plate stacks into one plate-high column. The
      tools used to be a vertical stack, which made this row three buttons
@@ -87,17 +94,6 @@
     margin: 0 auto;
   }
   #tools { flex: 0 0 auto; }
-  /* What is on the brush, shown as paint rather than as a sentence: full
-     strength at the left, thinning to the right, exactly like the ramps in
-     the paint box. The recipe itself is already legible on the pans. */
-  #brushpreview {
-    flex: 0 0 auto;
-    width: 168px;
-    height: 72px;
-    border-radius: 10px;
-    background: #efece6;
-    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35), inset 0 2px 8px rgba(0,0,0,0.18);
-  }
   .panparts {
     position: absolute;
     top: 2px; right: 3px;
@@ -183,7 +179,7 @@
   }
   .pan {
     position: relative;
-    aspect-ratio: 2.0;
+    aspect-ratio: 2.4;
     border-radius: 6px;
     border: 1px solid rgba(0,0,0,0.4);
     box-shadow: inset 0 2px 5px rgba(0,0,0,0.45), inset 0 -1px 2px rgba(255,255,255,0.15);
@@ -323,19 +319,19 @@
        the same width, and eight across squeezed both the pans and the brush
        sliders down to slivers; stacked, the pans are the plate's own height
        and everything else gets room. */
-    #palette { min-width: 280px; }
+    #workbench { width: 380px; max-width: none; margin: 0; flex: 0 0 auto; }
+    #palette { min-width: 0; }
     #brushrow { width: 330px; margin: 0; flex: 0 0 auto; }
     #controls { width: 310px; margin: 0; flex: 0 0 auto; }
-    .pan { aspect-ratio: 1.7; }
+    .pan { aspect-ratio: 2.2; }
   }
   /* Phones: every row earns its height. The plate shrinks, the brush column
      fills what is left, and nothing wraps to a second line. */
   @media (max-width: 520px) {
     #toolbar { gap: 6px; padding: 7px 8px max(5px, var(--safe-bottom)); }
-    #brushpreview { width: 124px; height: 66px; }
     .tool { height: 31px; font-size: 17px; }
     #palette { gap: 4px; }
-    .pan { aspect-ratio: 1.7; border-radius: 5px; }
+    .pan { aspect-ratio: 2.4; border-radius: 5px; }
     .panlabel { font-size: 7px; }
     button.small { padding: 4px 5px; }
   }
@@ -355,7 +351,6 @@
 <div id="err"></div>
 <div id="toolbar">
   <div id="workbench">
-    <div id="brushpreview" title="What is on the brush: full strength on the left, thinning out to the right"></div>
     <div id="palette"></div>
   </div>
   <div id="brushrow">
