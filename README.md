@@ -87,22 +87,23 @@ dark wash), potent-and-dry (drybrush), pale-and-wet (pale wash),
 pale-and-dry (faint scumble). Water leaves the brush faster than pigment,
 so a long stroke dries out and concentrates into a natural drybrush tail.
 
-Three sliders sit on the brush itself, and they are the same two axes plus
-their ratio:
+**Nothing couples the two.** Two sliders, one per axis:
 
-- **🎨 Paint** — how much colour is on the hairs.
+- **🎨 Paint** — how much of the mix is on the hairs.
 - **💧 Water** — how much water is on the hairs.
-- **◍ Dilution** — their ratio, labelled on Zbukvic's consistency scale
-  (tea / coffee / milk / cream / butter). Dragging it thins or thickens the
-  paint *at constant water*, so you can change the colour's value without
-  changing how wet the paper will get.
 
-They double as the level meters: however you load the brush — dipping,
-swirling, painting a long stroke — they show where it stands.
+Every water control — the slider, the glass, the sponge — leaves the paint
+exactly as it was, and the Paint slider leaves the water alone while keeping
+the recipe's proportions. Earlier versions modelled the real couplings (a
+wet brush dissolves more out of a pan, a water dip washes pigment off the
+hairs) and they were true to life, but they made the two knobs fight each
+other. There was also a third slider for dilution, the ratio of the other
+two; a control whose value is decided by the other controls is a knob that
+moves on its own, and it is gone. The consistency is still named
+(tea / coffee / milk / cream / butter) as a readout.
 
-Loading is a **swirl, not a tap**: press on a pan (or the water, or the
-sponge) and work the brush around, and it keeps taking up more the longer
-you go. A single tap still gives one dose.
+The water glass and sponge still take a **swirl**: press and work the brush
+around and it keeps taking up (or blotting off) more the longer you go.
 
 By default the brush **runs out as you paint** — water and pigment leave the
 hairs, so a long stroke fades into a dry-brush tail. That can be switched off
@@ -118,11 +119,13 @@ glass** and a **sponge**. The brush is stateful — it carries water and a
 
 - **Dip a pan** to pick up paint (a wet brush dissolves the pan and picks up
   far more than a dry one, which only scuffs colour off it).
-- **Mix by parts.** Each tap on a pan adds one part to the recipe: tap yellow
-  seven times, black once, blue twice and the brush carries 7:1:2, shown as
-  a running readout. The Paint slider then says *how much* of that mixture is
-  on the hairs — ratio and quantity stay separate, the same split as water
-  and pigment. Every component keeps its own physics on the paper, so a mix
+- **Mix by parts.** A pan is a dial for its own share of the recipe:
+  **tap** adds a part, **drag up or down** sets it live, **long press**
+  takes it out. Yellow to 7, black to 1, blue to 2 and the brush carries
+  7:1:2, shown as a running readout. Dragging matters more than tapping —
+  a proportion is something you feel your way to, and tapping seven times
+  to correct one part is not that. The Paint slider then says *how much*
+  of that mixture is on the hairs, so ratio and quantity stay separate. Every component keeps its own physics on the paper, so a mix
   containing ultramarine still granulates and one containing quinacridone
   still stains.
 
@@ -162,12 +165,6 @@ glass** and a **sponge**. The brush is stateful — it carries water and a
   wash that has just lost its shine this is the classic bloom-maker: the
   drop pushes outward through the damp paint and strands it in a
   cauliflower ring.
-- **🌬 Hair dryer** — toggle, then hold on the paper. Dries *only where you
-  point it*, so you can freeze a bloom at the moment you like it, or set one
-  passage while the next stays open. Drag and the airflow blows the wet film
-  along with the nozzle — how you turn a drip into a streak or push a wash
-  into a corner. It drives water out of the sheet as well as off the
-  surface, so it genuinely sets the paper rather than skinning it.
 
 ## Layout
 
@@ -298,8 +295,8 @@ way to report "this didn't behave like real watercolor".
   on a table, and the reading is rotated into screen space so it points
   downhill on an iPad held sideways too. **Tilt strength** in Settings sets
   how steeply it runs.
-- **Dry fast**: hold to flash-dry, then glaze over — dried washes resist
-  re-blending except through deliberate rewetting.
+- **Dry**: hold to flash-dry the sheet, then glaze over — dried washes
+  resist re-blending except through deliberate rewetting.
 - **Save** exports a PNG.
 
 ## Files

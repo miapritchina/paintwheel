@@ -674,43 +674,6 @@ void main() {
   frag = s;
 }`;
 
-// ---------------------------------------------------------------- dryer ----
-// Hair dryer: a local blast of moving air. Two things happen at once, and
-// both matter to how artists actually use one — it dries WHERE you point it
-// (freezing a bloom, or setting one passage while the next stays open), and
-// the airflow SHOVES the wet film along, which is how you blow a drip into
-// a streak or push a wash into a corner.
-SHADERS.dryer = `#version 300 es
-${COMMON}
-uniform sampler2D uFlow;
-uniform sampler2D uSat;
-uniform vec2 uCenter;
-uniform float uRadius;
-uniform vec2 uAspect;
-uniform vec2 uDir;      // airflow direction (nozzle -> paper)
-uniform float uPower;
-layout(location=0) out vec4 oFlow;
-layout(location=1) out vec4 oSat;
-
-void main() {
-  vec4 f = texture(uFlow, vUV);
-  vec4 s = texture(uSat, vUV);
-  vec2 d = (vUV - uCenter) * uAspect;
-  float r = length(d) / max(uRadius, 1e-5);
-  float m = 1.0 - smoothstep(0.15, 1.0, r);
-  if (m > 0.0) {
-    // evaporation under the nozzle, and the damp sheet gives up its water
-    // too — a dryer sets paper properly, it doesn't just skin the surface
-    f.x = max(f.x - uPower * uDt * 0.02 * m, 0.0);
-    s.x = max(s.x - uPower * uDt * 0.004 * m, 0.0);
-    if (f.x < 0.0004) f.w = f.w * (1.0 - m);
-    // the blast itself: only a genuinely wet film is moved by air
-    f.yz += uDir * uPower * m * 0.35 * smoothstep(0.002, 0.02, f.x);
-  }
-  oFlow = f;
-  oSat = s;
-}`;
-
 // ---------------------------------------------------------------- probe ----
 // "Is anything still wet?", answered on the GPU and read back as one small
 // byte buffer. The app used to run the whole pipeline every frame forever,

@@ -32,14 +32,16 @@
   const NPIG = N_CHANNELS; // brush carries per-CHANNEL loads
 
   // -------------------------------------------------------------- brush ---
-  // Two INDEPENDENT quantities, exactly as on a real brush:
+  // Two INDEPENDENT quantities, and nothing couples them:
   //   water  - how much fluid the hairs carry (0 bone dry .. 1 dripping).
   //            This alone decides how wet the paper gets.
   //   pig[]  - how much pigment sits on the hairs. This alone decides how
-  //            strong the color is.
-  // Their ratio is the paint's consistency (tea .. butter). So all four
-  // combinations are reachable: potent-and-dry (drybrush), potent-and-wet
-  // (juicy dark wash), pale-and-dry (scumble), pale-and-wet (pale wash).
+  //            strong the colour is.
+  // Every water control (the slider, the glass, the sponge) leaves the paint
+  // exactly as it was, and every paint control leaves the water alone. The
+  // simulated versions of these — a wet brush dissolving more out of a pan,
+  // a water dip washing pigment off — were true to life but made the two
+  // knobs fight each other, so they are gone.
   const brush = {
     water: 0.6,
     pig: new Float32Array(NPIG),
@@ -85,38 +87,24 @@
   }
 
   // ------------------------------------------------- live brush sliders ---
-  // Three sliders over the same two-axis brush. Paint and Water are the
-  // actual state; Dilution is their ratio, and dragging it re-scales the
-  // pigment at constant water — i.e. it thins or thickens the paint without
-  // changing how wet the paper will get.
+  // Two sliders, one per axis. There was a third for dilution — the ratio of
+  // the two — but a control whose value is decided by the other two controls
+  // is a knob that moves on its own, and the pans now set the recipe.
   const paintSl = document.getElementById('paintload');
   const waterSl = document.getElementById('waterload');
-  const dilSl = document.getElementById('dilution');
   let sliderEcho = false; // suppress feedback while we write slider values
-
-  const dilFromSlider = (v) => 0.02 + 0.88 * Math.pow(1 - v / 100, 2);
-  const sliderFromDil = (r) => 100 * (1 - Math.sqrt(Math.max(r - 0.02, 0) / 0.88));
 
   paintSl.addEventListener('input', () => {
     if (sliderEcho) return;
     const target = (Number(paintSl.value) / 100) * PIG_CAP;
-    if (brushTotal() < 1e-5) { updateBrushView('Dip a pan first — no paint on the brush to scale'); return; }
-    setPaintLoad(target);
-    updateBrushView(`Paint ${paintSl.value}% — ${consistency()}`);
+    if (partsTotal() <= 0) { updateBrushView('Tap a pan first — no colour to load'); return; }
+    applyMix(target); // keeps the recipe, changes only how much of it
+    updateBrushView(`Paint ${paintSl.value}%`);
   });
   waterSl.addEventListener('input', () => {
     if (sliderEcho) return;
-    brush.water = Number(waterSl.value) / 100;
-    updateBrushView(`Water ${waterSl.value}% — ${consistency()}`);
-  });
-  dilSl.addEventListener('input', () => {
-    if (sliderEcho) return;
-    if (brushTotal() < 1e-5) { updateBrushView('Dip a pan first — nothing to dilute'); return; }
-    const r = dilFromSlider(Number(dilSl.value));
-    // r = p / (p + 2.2w)  ->  p = r*2.2w / (1-r), at constant water
-    const w = Math.max(brush.water, 0.02);
-    setPaintLoad(Math.min(PIG_CAP, (r * 2.2 * w) / Math.max(1 - r, 0.02)));
-    updateBrushView(`Dilution — ${consistency(r)}`);
+    brush.water = Number(waterSl.value) / 100; // paint is not touched
+    updateBrushView(`Water ${waterSl.value}%`);
   });
 
   function updateBrushView(msg) {
@@ -133,7 +121,6 @@
     sliderEcho = true;
     paintSl.value = String(Math.round(Math.min(total / PIG_CAP, 1) * 100));
     waterSl.value = String(Math.round(brush.water * 100));
-    dilSl.value = String(Math.round(sliderFromDil(dilutionRatio())));
     sliderEcho = false;
     paintSl.style.setProperty('--fill', color);
     brushcursor.style.background = total > 0.01 ? color.replace('rgb', 'rgba').replace(')', ',0.35)') : 'rgba(200,220,255,0.2)';
@@ -154,7 +141,7 @@
       lastPt = { x: e.clientX, y: e.clientY };
       total = 1;
       try { el.setPointerCapture(e.pointerId); } catch { /* mouse w/o capture */ }
-      step(1, true);
+      step(1);
     });
     el.addEventListener('pointermove', (e) => {
       if (!active) return;
@@ -165,7 +152,7 @@
       // ~55px of swirling is worth another full dip
       const dose = Math.min(d, 30) / 55;
       total += dose;
-      step(dose, false);
+      step(dose);
     });
     const stop = () => {
       if (!active) return;
@@ -198,10 +185,15 @@
 
   // Restate the brush's pigment as the recipe, keeping however much paint is
   // already on it (or a starting dose if it was empty).
+  // Restate the brush's pigment as the recipe. How MUCH paint is on the
+  // brush is its own quantity — set by the Paint slider, carried over when
+  // the recipe changes, and defaulting to the "paint per dip" setting when
+  // the brush was empty. Water is never consulted.
   function applyMix(load) {
     const tot = partsTotal();
     if (tot <= 0) { brush.pig.fill(0); return; }
-    const amount = load != null ? load : Math.max(brushTotal(), SET.pickup * 0.6);
+    const amount = load != null ? load
+      : (brushTotal() > 0.01 ? brushTotal() : Math.min(PIG_CAP, SET.pickup));
     for (let i = 0; i < NPIG; i++) brush.pig[i] = (PARTS[i] / tot) * amount;
   }
 
@@ -234,6 +226,67 @@
   }
   document.getElementById('mixclear').addEventListener('click', () => clearMix());
 
+  // A pan is a dial for its own share of the recipe:
+  //   tap             +1 part
+  //   drag up/down    raise / lower that share, live
+  //   long press      take it out of the mix
+  // Dragging is the important one — a proportion is something you feel your
+  // way to, and tapping seven times to correct one part is not that.
+  const PART_PX = 20;   // pixels of drag per part
+  const PART_MAX = 20;
+
+  function panGesture(el, i) {
+    let active = false, startY = 0, startParts = 0, changed = false, held = null;
+
+    const commit = (why) => {
+      refreshParts();
+      applyMix();
+      updateBrushView(partsTotal() > 0 ? `${mixText()}` : 'Mix empty');
+      if (why) LOGBOOK.log('parts', { pan: i, name: PANS[i].paint.name, parts: PARTS[i], how: why, mix: mixText() });
+    };
+
+    el.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      active = true; changed = false;
+      startY = e.clientY;
+      startParts = PARTS[i];
+      try { el.setPointerCapture(e.pointerId); } catch { /* mouse w/o capture */ }
+      held = setTimeout(() => {
+        if (changed) return;
+        changed = true; // a long press consumes the tap
+        PARTS[i] = 0;
+        commit('hold');
+      }, 500);
+    });
+
+    el.addEventListener('pointermove', (e) => {
+      if (!active) return;
+      e.preventDefault();
+      const dy = startY - e.clientY; // up is more
+      if (!changed && Math.abs(dy) < 6) return;
+      clearTimeout(held);
+      const next = Math.max(0, Math.min(PART_MAX, Math.round(startParts + dy / PART_PX)));
+      if (next === PARTS[i]) { changed = true; return; }
+      changed = true;
+      PARTS[i] = next;
+      commit(null);
+    });
+
+    const end = () => {
+      if (!active) return;
+      active = false;
+      clearTimeout(held);
+      if (!changed) { // a plain tap adds one part
+        PARTS[i] = Math.min(PART_MAX, PARTS[i] + 1);
+        commit('tap');
+      } else {
+        LOGBOOK.log('parts', { pan: i, name: PANS[i].paint.name, parts: PARTS[i], how: 'drag', mix: mixText() });
+      }
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }
+
   function rebuildPans() {
     paletteEl.innerHTML = '';
     PANS.forEach((pan, i) => {
@@ -243,7 +296,7 @@
       const b = document.createElement('button');
       b.className = 'pan';
       b.style.background = p.swatch;
-      b.title = `${p.name} (${p.ci}) — tap to add a part, press and swirl for more paint`;
+      b.title = `${p.name} (${p.ci}) — tap to add a part, drag up/down to set it, hold to remove`;
       const badge = document.createElement('div');
       badge.className = 'panparts';
       const label = document.createElement('div');
@@ -252,27 +305,8 @@
       b.appendChild(badge);
       wrap.appendChild(b);
       wrap.appendChild(label);
-      // The tap target is the whole wrapper, name label included. The pans
-      // are short so the bar stays out of the way, and this buys the touch
-      // area back without costing any height.
-      swirl(wrap, (dose, first) => {
-        if (first) PARTS[i] += 1; // one tap, one part
-        // a wet brush dissolves the hard pan and picks up a lot; a dry one
-        // only scuffs a little colour off it
-        const pickup = (0.25 + 0.75 * brush.water) * SET.pickup * dose;
-        applyMix(Math.min(PIG_CAP, brushTotal() + pickup));
-        brush.water = Math.max(brush.water - 0.05 * dose, 0);
-        if (first) refreshParts();
-        updateBrushView(`${mixText()} — ${consistency()}`);
-      }, (total) => {
-        LOGBOOK.log('dipPan', {
-          pig: i, name: PANS[i].paint.name,
-          doses: Math.round(total * 100) / 100,
-          parts: Math.round(PARTS[i]),
-          mix: mixText(),
-          water: Math.round(brush.water * 100) / 100,
-        });
-      });
+      // the whole cell is the target, name label included
+      panGesture(wrap, i);
       paletteEl.appendChild(wrap);
     });
     refreshParts();
@@ -281,14 +315,11 @@
   window.__refreshPalette = rebuildPans;
 
   // ------------------------------------------- water / clean / sponge -----
-  // Tip dip: only the point of the brush touches the water, so it gains
-  // water and keeps nearly all its paint. Hold and swirl to take up more
-  // (and wash out more). 🌀 is the real rinse.
+  // Adds water to the brush and changes nothing else. Hold and swirl to take
+  // up more. 🌀 is the real rinse: it empties both axes and the recipe.
   swirl(document.getElementById('glass'), (dose) => {
     brush.water = Math.min(1, brush.water + 0.28 * SET.waterDip * dose);
-    const k = Math.pow(0.97, dose);
-    for (let i = 0; i < NPIG; i++) brush.pig[i] *= k;
-    updateBrushView(`Water — ${consistency()}`);
+    updateBrushView(`Water ${Math.round(brush.water * 100)}%`);
   }, (total) => LOGBOOK.log('glass', {
     doses: Math.round(total * 100) / 100,
     water: Math.round(brush.water * 100) / 100,
@@ -308,10 +339,8 @@
   // Sponge: sheds water, keeps most of the pigment (the "thirsty brush" for
   // controlled dry-brush and for lifting). Hold and wipe to keep drying it.
   swirl(document.getElementById('sponge'), (dose) => {
-    brush.water *= Math.pow(0.25, dose);
-    const k = Math.pow(0.9, dose);
-    for (let i = 0; i < NPIG; i++) brush.pig[i] *= k;
-    updateBrushView(`Blotted — ${consistency()}`);
+    brush.water *= Math.pow(0.25, dose); // water only: the paint stays put
+    updateBrushView(`Blotted — water ${Math.round(brush.water * 100)}%`);
   }, (total) => LOGBOOK.log('sponge', {
     doses: Math.round(total * 100) / 100,
     water: Math.round(brush.water * 100) / 100,
@@ -606,14 +635,13 @@
   // What a touch on the paper does: paint, sprinkle salt, or drop clean
   // water. Salt and water-drop are sticky modes, so they get a dashed
   // cursor and are dismissed by touching any brush tool.
-  const MODE_BTN = { salt: 'salt', drop: 'drop', dryer: 'dryer' };
+  const MODE_BTN = { salt: 'salt', drop: 'drop' };
   const saltBtn = document.getElementById('salt');
   let mode = 'brush';
   const MODE_MSG = {
     brush: 'Back to the brush',
     salt: 'Salt: tap or drag over a damp wash to sprinkle',
     drop: 'Water drop: tap a wash that has lost its shine to bloom it',
-    dryer: 'Dryer: hold to dry just that spot, drag to blow the paint along',
   };
   function setMode(m, msg) {
     mode = m;
@@ -683,9 +711,6 @@
   let last = null;
   let salting = false;
   let saltLast = null;
-  // dryer: held position + the direction the nozzle is travelling, applied
-  // every frame for as long as the pointer is down
-  let drying_ = null;
 
   // Apple Pencil reports 0..1 force; mouse/finger report 0 or 0.5. Give the
   // pen a wider, slightly convex range so light strokes go genuinely fine
@@ -779,11 +804,6 @@
       dropAt(e.offsetX, e.offsetY);
       return;
     }
-    if (mode === 'dryer') {
-      snapshot();
-      drying_ = { x: e.offsetX, y: e.offsetY, dx: 0, dy: 0 };
-      return;
-    }
     painting = true;
     snapshot();
     last = null;
@@ -796,15 +816,6 @@
     brushcursor.style.top = e.clientY + 'px';
     brushcursor.style.width = size * 2 + 'px';
     brushcursor.style.height = size * 2 + 'px';
-    if (drying_) {
-      e.preventDefault();
-      const dx = e.offsetX - drying_.x, dy = e.offsetY - drying_.y;
-      const d = Math.hypot(dx, dy);
-      // the air travels the way the nozzle is moving; a held nozzle just dries
-      if (d > 0.5) drying_ = { x: e.offsetX, y: e.offsetY, dx: dx / d, dy: dy / d };
-      else drying_ = { ...drying_, x: e.offsetX, y: e.offsetY };
-      return;
-    }
     if (salting) {
       e.preventDefault();
       const dist = saltLast ? Math.hypot(e.offsetX - saltLast.x, e.offsetY - saltLast.y) : 99;
@@ -825,7 +836,6 @@
   canvas.addEventListener('pointerleave', () => { brushcursor.style.display = 'none'; });
   const end = () => {
     painting = false; last = null; salting = false; saltLast = null;
-    if (drying_) { LOGBOOK.log('dryerOff'); drying_ = null; }
     updateBrushView();
   };
   canvas.addEventListener('pointerup', end);
@@ -928,14 +938,6 @@
       LOGBOOK.tick();
       REPLAY.tick();
       DEMO.tick(sim);
-      if (drying_) {
-        const r = Number(sizeEl.value) * 2.2 + 14;
-        sim.blowDry(drying_.x, drying_.y, r, drying_.dx, drying_.dy, 1.0);
-        LOGBOOK.log('dryer', {
-          x: Math.round(drying_.x), y: Math.round(drying_.y), r: Math.round(r),
-          dx: Math.round(drying_.dx * 100) / 100, dy: Math.round(drying_.dy * 100) / 100,
-        });
-      }
       // A dry, untouched sheet has nothing to compute and nothing new to
       // draw — and the canvas keeps its last frame — so on an idle sheet
       // this costs nothing at all.

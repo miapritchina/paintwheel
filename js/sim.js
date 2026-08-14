@@ -145,7 +145,7 @@ class WatercolorSim {
 
   _initPrograms() {
     this.progs = {};
-    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'dryer', 'probe', 'clear', 'copy']) {
+    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'probe', 'clear', 'copy']) {
       this.progs[name] = this._program(name, SHADERS[name]);
     }
   }
@@ -716,26 +716,6 @@ class WatercolorSim {
     gl.uniform1f(p.uniforms.uSpacing, this.params.saltSpacing);
     gl.uniform1f(p.uniforms.uGrainSize, this.params.saltGrain);
     this._draw();
-    this.sat.swap();
-  }
-
-  // Hair dryer: point it at the sheet and hold. dirX/dirY is the direction
-  // the air is travelling across the paper (from the stroke), so dragging
-  // the nozzle blows the wet film along with it.
-  blowDry(xCss, yCss, radiusCss, dirX = 0, dirY = 0, power = 1.0) {
-    this.markDirty();
-    const gl = this.gl;
-    const cssW = this.canvas.clientWidth || window.innerWidth;
-    const cssH = this.canvas.clientHeight || window.innerHeight;
-    this._bindOutputs([this.flow.write, this.sat.write]);
-    const p = this._use('dryer', [['uFlow', this.flow.read], ['uSat', this.sat.read]]);
-    gl.uniform2f(p.uniforms.uCenter, xCss / cssW, 1 - yCss / cssH);
-    gl.uniform1f(p.uniforms.uRadius, radiusCss / cssW);
-    gl.uniform2f(p.uniforms.uAspect, 1.0, cssH / cssW);
-    gl.uniform2f(p.uniforms.uDir, dirX, -dirY); // css y is down, sim y is up
-    gl.uniform1f(p.uniforms.uPower, power);
-    this._draw();
-    this.flow.swap();
     this.sat.swap();
   }
 
