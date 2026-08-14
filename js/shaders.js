@@ -26,11 +26,14 @@
 
 'use strict';
 
-const SHADERS = {};
+// The pigment-heavy passes are generated for a given number of RGBA texture
+// pairs, so the whole set has to be rebuildable: the palette can grow from
+// three colours to five mid-painting, which is one texture pair to two.
+let SHADERS = {};
 
-// range helper for generating per-pair GLSL
-const NP = PIG_TEXTURES;
-const RP = Array.from({ length: NP }, (_, i) => i);
+function buildShaders(NP) {
+  const SHADERS = {};
+  const RP = Array.from({ length: NP }, (_, i) => i);
 
 SHADERS.vert = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -718,3 +721,8 @@ ${COMMON}
 uniform sampler2D uTex;
 out vec4 frag;
 void main() { frag = texture(uTex, vUV); }`;
+
+  return SHADERS;
+}
+
+SHADERS = buildShaders(PIG_TEXTURES);

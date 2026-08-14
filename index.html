@@ -289,6 +289,13 @@
     width: 100%;
   }
   #boxgrid .pan.inuse { outline: 2px dashed rgba(255,255,255,0.5); }
+  .pan.addpan {
+    background: rgba(255,255,255,0.08);
+    color: var(--panel-fg);
+    font-size: 20px; line-height: 1;
+    border-style: dashed;
+  }
+  #boxcost { opacity: 0.6; font-size: 11px; }
   .boxhint { text-align: center; font-size: 12px; opacity: 0.75; }
   #boxclose {
     align-self: center;
@@ -402,9 +409,11 @@
   <div id="pigname"></div>
 </div>
 <div id="boxpanel">
-  <div class="boxhint">Your working palette — tap a pan to select the slot to refill:</div>
+  <div class="boxhint">Your palette — tap a pan to select it, or <b>+</b> to add a colour:</div>
   <div id="boxslots"></div>
-  <div class="boxhint">Paint box — tap a color to put it in the selected pan:</div>
+  <div id="boxcost" class="boxhint"></div>
+  <button id="boxremove" class="small" style="align-self:center">Remove colour</button>
+  <div class="boxhint">Paint box — tap a colour to put it in the selected pan:</div>
   <div id="boxgrid"></div>
   <button id="boxclose">Done</button>
 </div>
@@ -452,6 +461,7 @@
 
   <div id="settitle" style="margin-top:6px">The sheet</div>
   <div class="btnrow" style="max-width:420px;justify-content:center">
+    <button id="newpainting" class="small" title="Clear the sheet and choose the palette for a new painting">New painting…</button>
     <button id="clear" class="small">Clear</button>
     <button id="tilt" class="small" title="Tilt the device and thick wet paint runs downhill">Tilt</button>
     <button id="demo" class="small">Demo</button>

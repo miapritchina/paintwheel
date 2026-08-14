@@ -511,11 +511,35 @@
   }
   paperSel.value = sim.paperName;
   // -------------------------------------------------------- paint box -----
-  // Choose which 8 paints from the full box occupy the working pans.
+  // Choose which paints occupy the working pans, and how many there are.
+  //
+  // The palette's size is the main thing you can spend or save here: one
+  // RGBA texture carries four channels, so 1-4 colours cost one texture
+  // pair, 5-8 two, 9-12 three. Three colours is a third of the pigment work
+  // of twelve, and a fourth colour is free on top of three.
+  //
+  // Adding a colour works at any time — the engine appends texture pairs
+  // without touching what is already painted. Removing one shifts every
+  // later pan down a slot, and a pan IS a channel, so that would recolour
+  // strokes: it is offered only on an empty sheet, i.e. a new painting.
   const boxPanel = document.getElementById('boxpanel');
   const boxSlots = document.getElementById('boxslots');
   const boxGrid = document.getElementById('boxgrid');
+  const boxCost = document.getElementById('boxcost');
+  const boxRemove = document.getElementById('boxremove');
   let selectedSlot = 0;
+  let sheetIsBlank = true; // set when the panel is opened
+
+  function syncChannels() {
+    const want = Math.max(1, Math.ceil(PANS.length / 4));
+    sim.setChannelTextures(want);
+  }
+
+  function costLine() {
+    const pairs = Math.max(1, Math.ceil(PANS.length / 4));
+    const next = PANS.length % 4 === 0 ? ' — the next colour adds a layer' : '';
+    return `${PANS.length} colour${PANS.length === 1 ? '' : 's'}, ${pairs} of 3 pigment layers${next}`;
+  }
 
   function rebuildBox() {
     boxSlots.innerHTML = '';
@@ -533,6 +557,32 @@
       wrap.appendChild(b); wrap.appendChild(label);
       boxSlots.appendChild(wrap);
     });
+    // a trailing "+" tile, so adding a colour is where adding a colour goes
+    if (PANS.length < MAX_CHANNELS) {
+      const wrap = document.createElement('div');
+      wrap.className = 'panwrap';
+      const b = document.createElement('button');
+      b.className = 'pan addpan';
+      b.textContent = '+';
+      b.title = 'Add a colour';
+      b.addEventListener('click', () => {
+        selectedSlot = -1; // the next box colour lands in a new pan
+        rebuildBox();
+        updateBrushView('Pick a colour from the box to add it');
+      });
+      const label = document.createElement('div');
+      label.className = 'panlabel';
+      label.textContent = 'add';
+      wrap.appendChild(b); wrap.appendChild(label);
+      if (selectedSlot === -1) b.classList.add('selected');
+      boxSlots.appendChild(wrap);
+    }
+
+    boxCost.textContent = costLine();
+    boxRemove.style.display = sheetIsBlank && PANS.length > 1 ? '' : 'none';
+    boxRemove.textContent = selectedSlot >= 0 && PANS[selectedSlot]
+      ? `Remove ${PANS[selectedSlot].paint.short}` : 'Remove colour';
+
     boxGrid.innerHTML = '';
     PAINTBOX.forEach((p) => {
       const wrap = document.createElement('div');
@@ -543,13 +593,23 @@
       b.style.background = p.swatch;
       b.title = `${p.name} (${p.ci}) — tint ${p.tint}, granulation ${p.gamma}, grain ${p.grain}, staining ${p.omega}`;
       b.addEventListener('click', () => {
-        // swapping a pan binds a NEW channel: strokes already painted with
-        // the old paint keep their color and identity
-        assignPan(selectedSlot, p.id);
-        LOGBOOK.log('palette', { slot: selectedSlot, id: p.id });
+        if (selectedSlot === -1) {
+          const slot = addPan(p.id);
+          if (slot < 0) { updateBrushView('The palette is full at 12 colours'); return; }
+          selectedSlot = slot;
+          syncChannels();
+          LOGBOOK.log('paletteAdd', { slot, id: p.id, colours: PANS.length });
+          updateBrushView(`${p.name} added — ${costLine()}`);
+        } else {
+          // a pan IS a channel, so this recolours earlier strokes of the
+          // paint that just left
+          assignPan(selectedSlot, p.id);
+          LOGBOOK.log('palette', { slot: selectedSlot, id: p.id });
+          updateBrushView(`${p.name} now in pan ${selectedSlot + 1}`);
+        }
+        PARTS.fill(0);
         rebuildBox();
         rebuildPans();
-        updateBrushView(`${p.name} now in pan ${selectedSlot + 1}`);
       });
       const label = document.createElement('div');
       label.className = 'panlabel';
@@ -558,10 +618,44 @@
       boxGrid.appendChild(wrap);
     });
   }
-  document.getElementById('boxbtn').addEventListener('click', () => {
+
+  boxRemove.addEventListener('click', () => {
+    if (!sheetIsBlank || selectedSlot < 0 || PANS.length <= 1) return;
+    const gone = PANS[selectedSlot].paint.short;
+    removePan(selectedSlot);
+    selectedSlot = Math.min(selectedSlot, PANS.length - 1);
+    PARTS.fill(0);
+    syncChannels();
+    LOGBOOK.log('paletteRemove', { colours: PANS.length });
+    rebuildBox();
+    rebuildPans();
+    updateBrushView(`${gone} removed — ${costLine()}`);
+  });
+
+  function openBox(blank) {
+    sheetIsBlank = blank;
+    selectedSlot = Math.min(Math.max(selectedSlot, 0), PANS.length - 1);
     rebuildBox();
     boxPanel.classList.add('open');
+  }
+  document.getElementById('boxbtn').addEventListener('click', () => openBox(!sim.anythingWet() && sim.undoCount === 0));
+
+  // A new painting: blank sheet, and the palette fully open — including the
+  // number of colours, which can only shrink when there is nothing to lose.
+  document.getElementById('newpainting').addEventListener('click', () => {
+    if (!window.confirm('Start a new painting? The current sheet is cleared.')) return;
+    sim.clearAll();
+    sim.clearUndo();
+    PARTS.fill(0);
+    brush.pig.fill(0);
+    LOGBOOK.log('newPainting');
+    settingsPanel.classList.remove('open');
+    refreshParts();
+    rebuildPans();
+    openBox(true);
+    updateBrushView('New sheet — choose your colours');
   });
+
   document.getElementById('boxclose').addEventListener('click', () => {
     boxPanel.classList.remove('open');
   });
@@ -858,6 +952,7 @@
         paper: { name: sim.paperName, seed: sim.paperSeed },
         channels: CHANNELS.map((c) => (c ? c.id : null)),
         pans: PANS.map((p) => ({ id: p.paint.id, chan: p.chan })),
+        colours: PANS.length,
         brush: { water: brush.water, pig: Array.from(brush.pig) },
         parts: Array.from(PARTS),
         drying: Number(dryingEl.value),
@@ -881,6 +976,8 @@
       const st = await STORE.get('state');
       if (!st || st.v !== 1) return;
       restoreBindings(st.channels, st.pans);
+      // a restored palette may be a different size than the default
+      sim.setChannelTextures(Math.max(1, Math.ceil(PANS.length / 4)));
       rebuildPans();
       if (st.paper && st.paper.name) {
         paperSel.value = st.paper.name;

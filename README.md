@@ -231,9 +231,33 @@ frame in the old build. Three changes:
 
 ## Paint box & channels
 
-The working palette is 12 pans chosen from the full paint box, and a pan
-*is* a simulation channel — slot i always paints with channel i. Swapping a
-pan therefore recolours any earlier strokes made with the paint that left.
+The working palette is **1 to 12 pans** chosen from the full paint box, and
+a pan *is* a simulation channel — slot i always paints with channel i.
+Swapping a pan therefore recolours any earlier strokes made with the paint
+that left.
+
+**The size of the palette is the main thing you can spend or save**, and it
+comes in blocks of four, because one RGBA texture carries four channels:
+
+| colours | pigment texture pairs |
+|---|---|
+| 1–4 | 1 |
+| 5–8 | 2 |
+| 9–12 | 3 |
+
+So a three-colour painting runs a third of the pigment work of a twelve, and
+a fourth colour on top of three is free. **New painting…** (in ⚙) clears the
+sheet and opens the palette with the count unlocked; the panel says which
+block you are in and when the next colour will cost a layer.
+
+**Adding a colour works at any time, mid-painting.** Crossing a block
+boundary allocates another texture pair and recompiles the pigment shaders,
+which are generated for a fixed pair count — the existing textures are kept
+as they are and empty ones appended, so nothing already painted is
+disturbed. Verified: deposited pigment identical before and after going
+from four colours to five. *Removing* a colour shifts every later pan down a
+slot, and a pan is a channel, so it would recolour strokes; it is offered
+only on a blank sheet.
 An earlier build carried 16 channels so a swap could take a spare one and
 leave old strokes alone; that cost a quarter of every simulation step to
 protect a case the artist does not care about. Each paint is

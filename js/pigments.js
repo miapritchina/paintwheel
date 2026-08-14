@@ -20,16 +20,26 @@
 
 'use strict';
 
-// Three RGBA textures = 12 pigment channels, and there are 12 pans, so a pan
-// IS a channel — slot i always paints with channel i. The old build carried
-// 16 channels so that swapping a pan could allocate a spare one and leave
-// earlier strokes untouched; that cost a quarter of every simulation step
-// for a case the artist does not care about. Swapping now recolours any
-// earlier strokes made with the paint that left.
-const PIG_TEXTURES = 3;
-const N_CHANNELS = PIG_TEXTURES * 4;
+// A pan IS a channel: slot i always paints with channel i. Swapping a pan's
+// paint therefore recolours earlier strokes made with the paint that left —
+// the alternative was spare channels nobody paints with, at a quarter of
+// every simulation step.
+//
+// The palette's SIZE is variable, and the cost of it comes in blocks of
+// four, because one RGBA texture carries four channels:
+//     1-4 colours  -> 1 texture pair
+//     5-8 colours  -> 2
+//     9-12 colours -> 3
+// So a three-colour painting runs a third of the pigment work of a twelve,
+// and adding a fourth colour to it is free. Crossing a boundary (4 -> 5)
+// allocates another pair and recompiles the pigment shaders, which the
+// engine can do without disturbing the painting.
+const MAX_CHANNELS = 12;
+const N_CHANNELS = MAX_CHANNELS; // JS-side arrays are always full size
+let PIG_TEXTURES = 3;            // texture pairs actually allocated
+const texturesFor = (colours) => Math.max(1, Math.ceil(colours / 4));
 
-const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
+const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings, setPalette, addPan, removePan } = (() => {
   const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
   const arccoth = (x) => 0.5 * Math.log((x + 1) / (x - 1));
 
@@ -157,8 +167,37 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
   // Bind a paint to a pan. Slot i owns channel i, full stop.
   function assign(slot, paintId) {
     const paint = box[paintId];
+    if (!paint || slot < 0 || slot >= MAX_CHANNELS) return;
     channels[slot] = paint;
     pans[slot] = { paint, chan: slot };
+    channels.version++;
+  }
+
+  // Append a colour. Returns its slot, or -1 if the palette is full.
+  function add(paintId) {
+    if (pans.length >= MAX_CHANNELS) return -1;
+    const slot = pans.length;
+    assign(slot, paintId);
+    return slot;
+  }
+
+  // Drop a colour. Every pan after it shifts down a slot, which means it
+  // also changes channel — so this is only safe on an empty sheet, and the
+  // UI only offers it when starting a new painting.
+  function remove(slot) {
+    if (pans.length <= 1 || slot < 0 || slot >= pans.length) return;
+    pans.splice(slot, 1);
+    channels.fill(null);
+    pans.forEach((p, i) => { p.chan = i; channels[i] = p.paint; });
+    channels.version++;
+  }
+
+  // Replace the whole palette (a new painting).
+  function setAll(paintIds) {
+    pans.length = 0;
+    channels.fill(null);
+    paintIds.slice(0, MAX_CHANNELS).forEach((id, i) => assign(i, id));
+    if (!pans.length) assign(0, 0);
     channels.version++;
   }
 
@@ -182,5 +221,6 @@ const { PAINTBOX, CHANNELS, PANS, assignPan, restoreBindings } = (() => {
    'Cobalt', 'Prussian', 'C. Turq', 'Emerald']
     .forEach((short, slot) => assign(slot, box.findIndex((p) => p.short === short)));
 
-  return { PAINTBOX: box, CHANNELS: channels, PANS: pans, assignPan: assign, restoreBindings: restore };
+  return { PAINTBOX: box, CHANNELS: channels, PANS: pans, assignPan: assign,
+           restoreBindings: restore, setPalette: setAll, addPan: add, removePan: remove };
 })();

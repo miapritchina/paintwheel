@@ -275,6 +275,40 @@ class WatercolorSim {
     gl.deleteTexture(tmpTex);
   }
 
+  // ------------------------------------------------------------ channels --
+  // Change how many pigment texture pairs are allocated. Growing keeps the
+  // existing textures exactly as they are and appends empty ones, so the
+  // painting is untouched when a fourth colour becomes a fifth; only the
+  // pigment shaders are recompiled, because they are generated for a fixed
+  // pair count. Shrinking would throw away paint, so it is only allowed on
+  // an empty sheet — which is what starting a new painting is.
+  setChannelTextures(n) {
+    const gl = this.gl;
+    n = Math.max(1, Math.min(3, n));
+    if (n === PIG_TEXTURES) return true;
+    if (n > gl.getParameter(gl.MAX_COLOR_ATTACHMENTS) - 1) return false;
+
+    PIG_TEXTURES = n;
+    SHADERS = buildShaders(n);
+    for (const p of Object.values(this.progs)) gl.deleteProgram(p.prog);
+    this._initPrograms();
+
+    while (this.susp.length < n) {
+      this.susp.push(this._makePair(this.simW, this.simH));
+      this.dep.push(this._makePair(this.simW, this.simH));
+    }
+    while (this.susp.length > n) {
+      this._deletePair(this.susp.pop());
+      this._deletePair(this.dep.pop());
+    }
+    // undo snapshots hold a different number of layers now
+    this.clearUndo();
+    this._pigParams = null;
+    this._pigVersion = -1;
+    this.markDirty();
+    return true;
+  }
+
   // ----------------------------------------------------------------- idle --
   // Nothing on the sheet moves once the paper is dry, so there is no reason
   // to keep running the pipeline — and most of a painting session is spent
