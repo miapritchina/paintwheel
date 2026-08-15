@@ -609,6 +609,12 @@ class WatercolorSim {
       gl.uniform4f(p.uniforms[`uPig${i}`], pig[i * 4], pig[i * 4 + 1], pig[i * 4 + 2], pig[i * 4 + 3]);
     }
     gl.uniform1f(p.uniforms.uWetness, wetness);
+    // How far the same pigment mass is spread, anchored so that a brush at
+    // the default wetness paints exactly as it did before: below that the
+    // wash concentrates, above it thins and widens. Mass is conserved —
+    // amplitude falls as the square of the radius.
+    gl.uniform1f(p.uniforms.uPigSpread,
+      Math.max(0.5, Math.min(2.0, Math.sqrt((water + 0.004) / 0.037))));
     gl.uniform1f(p.uniforms.uPush, Math.min(0.6, water * 8.0));
     gl.uniform1f(p.uniforms.uScrub, scrub);
     this._draw();

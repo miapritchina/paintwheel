@@ -95,7 +95,10 @@
 
   paintSl.addEventListener('input', () => {
     if (sliderEcho) return;
-    const target = (Number(paintSl.value) / 100) * PIG_CAP;
+    // Squared, not linear. Colour depth saturates fast: on a measured ladder
+    // the whole readable range from a tint to a mass tone lived in the first
+    // third of a linear slider, and everything above it looked the same.
+    const target = Math.pow(Number(paintSl.value) / 100, 2) * PIG_CAP;
     if (partsTotal() <= 0) { updateBrushView('Tap a pan first — no colour to load'); return; }
     applyMix(target); // keeps the recipe, changes only how much of it
     updateBrushView(`Paint ${paintSl.value}%`);

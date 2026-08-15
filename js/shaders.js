@@ -127,6 +127,7 @@ ${RP.map((i) => `uniform vec4 uPig${i};`).join('\n')}
 uniform float uWetness;
 uniform float uPush;
 uniform float uScrub;
+uniform float uPigSpread;
 layout(location=0) out vec4 oFlow;
 ${RP.map((i) => `layout(location=${i + 1}) out vec4 oSusp${i};`).join('\n')}
 
@@ -145,14 +146,24 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);`).join('\n')}
   m *= mix(contact, 1.0, smoothstep(0.75, 1.0, uWetness));
   m *= 0.75 + 0.5 * pap.z;
 
-  if (m > 0.0) {
+  // The brush carries a fixed mass of pigment; the water decides what that
+  // mass is dissolved IN. A wetter brush lays the same pigment through a
+  // bigger, deeper film, so every square millimetre gets less of it — that
+  // is what dilution is, and without it the water control changed only how
+  // far a stroke crept, never how strong it looked.
+  float pr = length(d) / max(uRadius * max(uPigSpread, 1.0), 1e-5);
+  float pm = 1.0 - smoothstep(0.3, 1.0, pr);
+  pm *= mix(contact, 1.0, smoothstep(0.75, 1.0, uWetness));
+  pm *= (0.75 + 0.5 * pap.z) / (uPigSpread * uPigSpread);
+
+  if (m > 0.0 || pm > 0.0) {
     f.x += uWaterAmt * m;
     f.w = max(f.w, smoothstep(0.0, 0.08, m * uWaterAmt * 40.0));
     // outward shove where the dab lands on already-wet paper
     float rim = smoothstep(0.15, 0.85, r);
     f.yz += normalize(d + vec2(1e-6)) * (uPush * m * rim * f.w);
     // a clean wet brush scrubs suspended pigment off the sheet
-${RP.map((i) => `    g${i} = g${i} * (1.0 - uScrub * m) + uPig${i} * m;`).join('\n')}
+${RP.map((i) => `    g${i} = g${i} * (1.0 - uScrub * m) + uPig${i} * pm;`).join('\n')}
   }
   oFlow = f;
 ${RP.map((i) => `  oSusp${i} = g${i};`).join('\n')}
