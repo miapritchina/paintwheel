@@ -1,8 +1,8 @@
 // UI wiring: painter's workbench.
 //
-// The brush is a stateful object carrying water + a 12-pigment load. You dip
-// it in pans, dip the water glass to dilute, wipe it on the sponge, and
-// paint. Nothing refills by itself: a stroke that runs long goes dry-brush,
+// The brush is a stateful object carrying water + a 12-pigment load. Two
+// sliders set those two quantities and a tap on a pan sets the recipe;
+// nothing refills by itself, so a stroke that runs long goes dry-brush,
 // exactly like the real thing.
 //
 // Colours are mixed by PARTS on the pans rather than smeared together on a
@@ -37,11 +37,11 @@
   //            This alone decides how wet the paper gets.
   //   pig[]  - how much pigment sits on the hairs. This alone decides how
   //            strong the colour is.
-  // Every water control (the slider, the glass, the sponge) leaves the paint
-  // exactly as it was, and every paint control leaves the water alone. The
-  // simulated versions of these — a wet brush dissolving more out of a pan,
-  // a water dip washing pigment off — were true to life but made the two
-  // knobs fight each other, so they are gone.
+  // Every water control leaves the paint exactly as it was, and every paint
+  // control leaves the water alone. The simulated versions of these — a wet
+  // brush dissolving more out of a pan, a water dip washing pigment off —
+  // were true to life but made the two knobs fight each other, so they are
+  // gone, and so are the buttons that only ever moved the water slider.
   const brush = {
     water: 0.6,
     pig: new Float32Array(NPIG),
@@ -228,7 +228,7 @@
     // the colour still drives the brush cursor on the paper
     const color = total > 0.01 ? CHANNELS.kmColor(brush.pig, 1.5 + 12 * Math.min(total, 1.2)) : 'rgb(238,236,230)';
     // the sliders double as the level meters: writing them back keeps the
-    // display honest whichever way the brush was changed (dip, swirl, stroke)
+    // display honest whichever way the brush was changed (pan, slider, stroke)
     sliderEcho = true;
     paintSl.value = String(Math.round(Math.min(total / PIG_CAP, 1) * 100));
     waterSl.value = String(Math.round(brush.water * 100));
@@ -240,40 +240,6 @@
     if (msg !== undefined) pignameEl.textContent = msg;
   }
 
-  // -------------------------------------------------------------- swirl ---
-  // Loading a brush is a swirl, not a tap. Press and work the brush around
-  // in the pan (or the water, or the sponge) and it keeps taking up more;
-  // the longer the travel, the fuller the load. A plain tap still gives one
-  // dose, so nothing that worked before stops working.
-  function swirl(el, step, done) {
-    let active = false, lastPt = null, total = 0;
-    el.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      active = true;
-      lastPt = { x: e.clientX, y: e.clientY };
-      total = 1;
-      try { el.setPointerCapture(e.pointerId); } catch { /* mouse w/o capture */ }
-      step(1);
-    });
-    el.addEventListener('pointermove', (e) => {
-      if (!active) return;
-      e.preventDefault();
-      const d = Math.hypot(e.clientX - lastPt.x, e.clientY - lastPt.y);
-      if (d < 3) return;
-      lastPt = { x: e.clientX, y: e.clientY };
-      // ~55px of swirling is worth another full dip
-      const dose = Math.min(d, 30) / 55;
-      total += dose;
-      step(dose);
-    });
-    const stop = () => {
-      if (!active) return;
-      active = false; lastPt = null;
-      if (done) done(total);
-    };
-    el.addEventListener('pointerup', stop);
-    el.addEventListener('pointercancel', stop);
-  }
 
   // ------------------------------------------------------------ palette ---
   // Pans show the darkest possible mass tone (like real dried pans) with a
@@ -421,17 +387,13 @@
   rebuildPans();
   window.__refreshPalette = rebuildPans;
 
-  // ------------------------------------------- water / clean / sponge -----
-  // Adds water to the brush and changes nothing else. Hold and swirl to take
-  // up more. 🌀 is the real rinse: it empties both axes and the recipe.
-  swirl(document.getElementById('glass'), (dose) => {
-    brush.water = Math.min(1, brush.water + 0.28 * SET.waterDip * dose);
-    updateBrushView(`Water ${Math.round(brush.water * 100)}%`);
-  }, (total) => LOGBOOK.log('glass', {
-    doses: Math.round(total * 100) / 100,
-    water: Math.round(brush.water * 100) / 100,
-  }));
-
+  // ------------------------------------------------------------- rinse ----
+  // The water glass and the sponge used to live here. Both did one thing:
+  // move the water slider — the glass up, the sponge down — by swirling on a
+  // button instead of dragging the control that is already on screen. Once
+  // water stopped being tangled up with paint they were two spellings of the
+  // same knob, so they are gone. 🌀 is the one brush action left that the
+  // sliders cannot express.
   document.getElementById('clean').addEventListener('pointerdown', () => {
     // Rinse takes the COLOUR off the hairs and nothing else — water is the
     // water slider's business, and rinsing used to empty it too.
@@ -447,24 +409,13 @@
     updateBrushView('Rinsed — colour off, water untouched');
   });
 
-  // Sponge: sheds water, keeps most of the pigment (the "thirsty brush" for
-  // controlled dry-brush and for lifting). Hold and wipe to keep drying it.
-  swirl(document.getElementById('sponge'), (dose) => {
-    brush.water *= Math.pow(0.25, dose); // water only: the paint stays put
-    updateBrushView(`Blotted — water ${Math.round(brush.water * 100)}%`);
-  }, (total) => LOGBOOK.log('sponge', {
-    doses: Math.round(total * 100) / 100,
-    water: Math.round(brush.water * 100) / 100,
-  }));
-
   // ----------------------------------------------------------- controls ---
   const sizeEl = document.getElementById('size');
 
   // ----------------------------------------------------------- settings ---
   // Workbench preferences, persisted with the rest of the session state.
   const SET = {
-    pickup: 0.8,       // paint taken per dip / per swirl-dose
-    waterDip: 1.0,     // water taken per dip / per swirl-dose
+    pickup: 0.8,       // paint taken per dip
     saltGrain: 2.6,    // salt crystal size
     runoff: true,      // paint and water travel across the sheet
     pressureSize: true,// stylus pressure drives brush size
@@ -550,7 +501,6 @@
   const settingsPanel = document.getElementById('setpanel');
   const dryingEl = document.getElementById('drying');
   const pickupEl = document.getElementById('pickup');
-  const waterdipEl = document.getElementById('waterdip');
   const saltsizeEl = document.getElementById('saltsize');
   const runoffEl = document.getElementById('runoff');
   const pressEl = document.getElementById('presssize');
@@ -578,7 +528,6 @@
   }
   function applySettings(log = true) {
     SET.pickup = Number(pickupEl.value) / 100 * 1.6;
-    SET.waterDip = Number(waterdipEl.value) / 100 * 2.0;
     SET.saltGrain = Number(saltsizeEl.value) / 100 * 6.0;
     SET.runoff = runoffEl.checked;
     SET.pressureSize = pressEl.checked;
@@ -595,7 +544,7 @@
     sim.setFlow(SET.runoff);
     if (log) LOGBOOK.log('settings', { ...SET });
   }
-  for (const el of [pickupEl, waterdipEl, saltsizeEl, runoffEl, pressEl, depleteEl, tiltStrEl, pressRangeEl, qualityEl]) {
+  for (const el of [pickupEl, saltsizeEl, runoffEl, pressEl, depleteEl, tiltStrEl, pressRangeEl, qualityEl]) {
     el.addEventListener('input', () => applySettings());
   }
   dryingEl.addEventListener('input', () => applyDrying());
@@ -885,16 +834,16 @@
     }, 2000);
   });
 
-  // What a touch on the paper does: paint, sprinkle salt, or drop clean
-  // water. Salt and water-drop are sticky modes, so they get a dashed
-  // cursor and are dismissed by touching any brush tool.
-  const MODE_BTN = { salt: 'salt', drop: 'drop' };
+  // What a touch on the paper does: paint, or sprinkle salt. There was a
+  // water-drop mode too; a rinsed brush with the water slider up and no
+  // colour on it drops exactly the same clean water, so it was a button for
+  // something the brush already does.
+  const MODE_BTN = { salt: 'salt' };
   const saltBtn = document.getElementById('salt');
   let mode = 'brush';
   const MODE_MSG = {
     brush: 'Back to the brush',
     salt: 'Salt: tap or drag over a damp wash to sprinkle',
-    drop: 'Water drop: tap a wash that has lost its shine to bloom it',
   };
   function setMode(m, msg) {
     mode = m;
@@ -910,7 +859,7 @@
   }
   // returning to any brush tool clearly means you're done — leaving a mode
   // on silently was swallowing paint strokes
-  for (const id of ['glass', 'clean', 'sponge']) {
+  for (const id of ['clean']) {
     document.getElementById(id).addEventListener('pointerdown', () => { if (mode !== 'brush') setMode('brush', null); });
   }
   paletteEl.addEventListener('pointerdown', () => { if (mode !== 'brush') setMode('brush', null); });
@@ -1003,6 +952,10 @@
     // clean damp brush lifts pigment instead of depositing
     const scrub = total < 0.02 ? 0.08 * pressure * brush.water : 0;
     sim.splat(x, y, size, water, pigDep, brush.water, scrub);
+    // ...and a clean brush carrying real water re-dissolves paint that has
+    // only just set, which is how a bloom starts. The water-drop tool used
+    // to be the only way to ask for this.
+    if (total < 0.02 && brush.water > 0.35) sim.rewet();
   }
 
   function deplete(dist) {
@@ -1039,15 +992,6 @@
     last = { x, y };
   }
 
-  function dropAt(x, y) {
-    // A drop is a little wider than the brush's own footprint. It used to be
-    // 1.5x the brush and 8x the water of a dab, which is a flood: one drop
-    // carried as much water as twenty-four brush dabs.
-    const r = Number(sizeEl.value) * 1.1 + 6;
-    sim.dropWater(x, y, r, 1.0);
-    LOGBOOK.log('drop', { x: Math.round(x), y: Math.round(y), r: Math.round(r) });
-  }
-
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
@@ -1058,11 +1002,6 @@
       const r = Number(sizeEl.value) * 1.6;
       sim.sprinkleSalt(e.offsetX, e.offsetY, r);
       LOGBOOK.log('salt', { x: Math.round(e.offsetX), y: Math.round(e.offsetY), r: Math.round(r) });
-      return;
-    }
-    if (mode === 'drop') {
-      snapshot();
-      dropAt(e.offsetX, e.offsetY);
       return;
     }
     painting = true;
@@ -1124,7 +1063,7 @@
         parts: Array.from(PARTS),
         drying: Number(dryingEl.value),
         settings: {
-          pickup: Number(pickupEl.value), waterdip: Number(waterdipEl.value),
+          pickup: Number(pickupEl.value),
           saltsize: Number(saltsizeEl.value), runoff: runoffEl.checked,
           presssize: pressEl.checked, deplete: depleteEl.checked,
           tiltstrength: Number(tiltStrEl.value), pressrange: Number(pressRangeEl.value),
@@ -1160,7 +1099,6 @@
       if (st.settings) {
         const s = st.settings;
         if (s.pickup != null) pickupEl.value = s.pickup;
-        if (s.waterdip != null) waterdipEl.value = s.waterdip;
         if (s.saltsize != null) saltsizeEl.value = s.saltsize;
         if (s.runoff != null) runoffEl.checked = s.runoff;
         if (s.presssize != null) pressEl.checked = s.presssize;

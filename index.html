@@ -367,9 +367,7 @@
   </div>
   <div id="brushrow">
     <div id="tools">
-      <button id="glass" class="tool" title="Water: tap for a tip dip, or hold and swirl to keep taking up water">💧</button>
-      <button id="clean" class="tool" title="Rinse the brush right out: no colour, no water">🌀</button>
-      <button id="sponge" class="tool" title="Sponge: blot water off the brush (keeps most paint). Hold and wipe for drier.">🧽</button>
+      <button id="clean" class="tool" title="Rinse the colour off the hairs — the water slider is left alone">🌀</button>
     </div>
     <div id="brushwrap" title="The brush: paint on the hairs, water on the hairs, and their ratio (dilution)">
       <div id="brushsliders">
@@ -388,10 +386,9 @@
     </div>
     <div class="btnrow" id="modes">
       <button id="salt" class="small" title="Salt: sprinkle into a damp wash for starbursts">🧂</button>
-      <button id="drop" class="small" title="Water drop: drop clean water into a wash to bloom it">💦</button>
       <button id="wetview" class="small" title="Wetness view: see wet / satin / damp zones">👁</button>
       <button id="dry" class="small" title="Flash-dry the whole sheet (hold)">Dry</button>
-      <button id="undo" class="small" title="Undo the last stroke, drop, salting or clear">↶</button>
+      <button id="undo" class="small" title="Undo the last stroke, salting or clear">↶</button>
     </div>
   </div>
   <div id="pigname"></div>
@@ -423,10 +420,9 @@
   <div class="setrow"><span>Drying speed</span><input id="drying" type="range" min="0" max="100" value="30"></div>
   <div class="setnote">How fast the sheet loses its shine. Left = minutes of open wet-in-wet time, right = sets in seconds.</div>
 
-  <div class="setrow"><span>Paint per dip</span><input id="pickup" type="range" min="5" max="100" value="50"></div>
+  <div class="setrow"><span>First tap loads</span><input id="pickup" type="range" min="5" max="100" value="50"></div>
   <div class="setnote">How much colour one tap on a pan gives. Holding and swirling in the pan keeps loading beyond this.</div>
 
-  <div class="setrow"><span>Water per dip</span><input id="waterdip" type="range" min="5" max="100" value="50"></div>
   <div class="setnote">How much water one tap on 💧 gives. Hold and swirl for more.</div>
 
   <div class="setrow"><span>Salt grain size</span><input id="saltsize" type="range" min="10" max="100" value="43"></div>

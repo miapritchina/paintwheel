@@ -569,19 +569,15 @@ class WatercolorSim {
     if (!on) this.params.tilt = [0, 0];
   }
 
-  // A drop of clean water off the end of the brush (or a dropper): lands as
-  // a deep, sharply-bounded puddle. On a wash that has lost its shine this
-  // is what makes a bloom — the drop's water pushes outward through the
-  // damp paint and strands it in a cauliflower ring.
-  dropWater(xCss, yCss, radiusCss, amount = 1.0) {
-    const empty = this._emptyPig || (this._emptyPig = new Float32Array(N_CHANNELS));
-    this.splat(xCss, yCss, radiusCss, 0.12 * amount, empty, 1.0, 0);
-    // A backrun is not just water pushing pigment about: the drop lands on
-    // paint that has only just set and RE-DISSOLVES it, then carries it out
-    // to the drop's rim, where it strands as the cauliflower edge. Lifting
-    // is gated on free surface water, so raising it globally for a while
-    // only acts where the drop actually is.
-    this._rewet = Math.max(this._rewet || 0, 300);
+  // Clean water landing on a wash that has lost its shine is what makes a
+  // bloom, and a backrun is not just water pushing pigment about: the water
+  // RE-DISSOLVES paint that has only just set and carries it out to its own
+  // rim, where it strands as the cauliflower edge. Lifting is gated on free
+  // surface water, so raising it globally for a while only acts where the
+  // water actually is. This used to belong to a dedicated water-drop tool;
+  // it belongs to any clean wet brush, which is the same thing.
+  rewet(frames = 300) {
+    this._rewet = Math.max(this._rewet || 0, frames);
   }
 
   // --------------------------------------------------------------- brush --
