@@ -1,0 +1,384 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Paintwheel — the tells</title>
+<!--
+  The regression sheet. Every panel is one of the marks that make a picture
+  read as a watercolour rather than as a coloured drawing, painted through the
+  real paint model and the real engine, then measured.
+
+  It is not a screenshot test: each panel returns numbers, so "the darks got
+  potent again" or "the water slider stopped doing anything" is a number that
+  moved, not a matter of opinion. Run it with tools/tells.js.
+-->
+<style>
+  html, body { margin: 0; background: #23242a; color: #ddd;
+               font: 12px/1.4 ui-sans-serif, system-ui, sans-serif; }
+  #sheet { display: block; }
+</style>
+<canvas id="sheet"></canvas>
+
+<script src="../js/version.js"></script>
+<script src="../js/pigments.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/logbook.js"></script>
+<script src="../js/shaders.js"></script>
+<script src="../js/sim.js"></script>
+<script src="../js/brush.js"></script>
+<script>
+'use strict';
+
+// A headless sheet: the engine on its own canvas, driven straight from the
+// paint model. No UI, no pointer events, no timing — the same stroke twice
+// gives the same picture, which is what makes the numbers comparable.
+const W = 900, H = 620;
+const cv = document.getElementById('sheet');
+cv.style.width = W + 'px';
+cv.style.height = H + 'px';
+// The sheet runs at a modest simulation resolution on purpose. Every tell
+// here is structural — does the value ladder separate, does water spread
+// without darkening, does a heavy pigment settle more than a staining one —
+// and none of them needs a fine grid. It also has to finish in minutes on a
+// software renderer in CI, where a full-resolution sheet takes hours.
+const sim = new WatercolorSim(cv, { paper: 'coldpress', maxSim: 440 });
+window.sim = sim;
+
+const PAINTS = {}; // name -> channel index, assigned as panels ask for them
+
+function usePalette(names) {
+  setPalette(names.map((n) => PAINTBOX.findIndex((p) => p.short === n || p.name === n)));
+  sim.setChannelTextures(Math.max(1, Math.ceil(names.length / 4)));
+  names.forEach((n, i) => { PAINTS[n] = i; });
+}
+
+// ---------------------------------------------------------------- driving --
+function loadBrush(paint, frac, water) {
+  BRUSH.pig.fill(0);
+  BRUSH.pig[PAINTS[paint]] = 1;
+  BRUSH.setFrac(frac);
+  BRUSH.water = water;
+}
+
+// Paint a straight line the way the app does: dabs at a fixed step, each one
+// charged for the travel that got it there.
+function line(x0, y0, x1, y1, size, pressure = 0.6) {
+  const step = Math.max(size * 0.3, 2);
+  const dist = Math.hypot(x1 - x0, y1 - y0);
+  const n = Math.max(1, Math.round(dist / step));
+  const pig = new Float32Array(N_CHANNELS);
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const advance = i === 0 ? step : dist / n;
+    BRUSH.dry(advance);
+    const d = BRUSH.dab(advance, size, pressure, pig);
+    sim.splat(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, size, d.water, d.amp, d.wetness, d.scrub);
+  }
+}
+
+// Clean water only — no pigment on the hairs at all.
+function wetPatch(x, y, r, water = 0.9) {
+  const empty = new Float32Array(N_CHANNELS);
+  const step = Math.max(r * 0.3, 2);
+  for (let yy = y - r; yy <= y + r; yy += step) {
+    for (let xx = x - r; xx <= x + r; xx += step) {
+      if (Math.hypot(xx - x, yy - y) > r) continue;
+      sim.splat(xx, yy, r * 0.55, 0.055 * water, empty, water, 0);
+    }
+  }
+}
+
+function run(steps) { for (let i = 0; i < steps; i++) sim.step(); }
+
+// Dry the sheet out properly rather than a fixed number of frames: a panel
+// that happens to hold more water must not be measured half-wet.
+function dryOut(maxSteps = 900) {
+  const was = sim.params.drySpeed;
+  sim.params.drySpeed = 120;
+  let i = 0;
+  for (; i < maxSteps; i += 15) {
+    for (let k = 0; k < 15; k++) sim.step();
+    if (!sim.anythingWet()) break;
+  }
+  sim.params.drySpeed = was;
+  return i;
+}
+
+// ------------------------------------------------------------- measuring ---
+let pixels = null;
+function grab() {
+  sim.render();
+  const c = document.createElement('canvas');
+  c.width = cv.width; c.height = cv.height;
+  c.getContext('2d').drawImage(cv, 0, 0);
+  pixels = { d: c.getContext('2d').getImageData(0, 0, c.width, c.height).data,
+             w: c.width, h: c.height, dpr: c.width / W };
+}
+
+const lum = (i) => 0.2126 * pixels.d[i] + 0.7152 * pixels.d[i + 1] + 0.0722 * pixels.d[i + 2];
+
+// Statistics of a css-space rectangle: mean/min luminance, how much of it is
+// covered at all, and how rough it is at grain scale (which is granulation).
+function stats(x, y, w, h) {
+  const s = pixels.dpr;
+  const x0 = Math.round(x * s), y0 = Math.round(y * s);
+  const x1 = Math.round((x + w) * s), y1 = Math.round((y + h) * s);
+  let sum = 0, n = 0, min = 255, covered = 0, painted = 0;
+  const vals = [];
+  for (let py = y0; py < y1; py++) {
+    for (let px = x0; px < x1; px++) {
+      const L = lum((py * pixels.w + px) * 4);
+      sum += L; n++; vals.push(L);
+      if (L < min) min = L;
+      if (L < 215) covered++;  // touched by paint at all
+      if (L < 175) painted++;  // carrying real colour
+    }
+  }
+  const mean = sum / n;
+  let varSum = 0;
+  for (const v of vals) varSum += (v - mean) * (v - mean);
+  return { mean, min, covered: covered / n, painted: painted / n, sd: Math.sqrt(varSum / n) };
+}
+
+// Optical depth implied by a luminance, against unpainted paper. Reporting
+// value in the same units the paint box ramp uses (14 / 5 / 2 / 0.8 / 0.3)
+// is the only way to say "this is too potent" as a number.
+let paperL = 235;
+const depthOf = (L) => Math.max(0, -Math.log(Math.max(L, 1) / paperL) / 0.36);
+
+// How sharp the edge of a mark is: the steepest luminance step across a line.
+function edgeSharpness(x, y, w, h) {
+  const s = pixels.dpr;
+  let best = 0;
+  const py = Math.round((y + h / 2) * s);
+  for (let px = Math.round(x * s); px < Math.round((x + w) * s) - 2; px++) {
+    const g = Math.abs(lum((py * pixels.w + px + 2) * 4) - lum((py * pixels.w + px) * 4));
+    if (g > best) best = g;
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------- panels ---
+// Each panel gets a band of the sheet and reports its own numbers.
+const RESULT = { panels: {} };
+const PANEL_H = 74;
+const panelY = (i) => 18 + i * PANEL_H;
+
+async function paintSheet() {
+  usePalette(['Ultram.', 'Pyrrole', 'Gran. Bk', 'Phthalo']);
+  sim.clearAll();
+  grab();
+  paperL = stats(20, 4, 60, 10).mean; // unpainted paper, for the depth scale
+
+  // 0. VALUE LADDER — tea to mass tone, at one fixed water.
+  //    The tell: a watercolour has its whole range in one picture. Six steps
+  //    must be six distinguishable values, not four blacks and two tints.
+  {
+    const y = panelY(0), fr = [0.04, 0.1, 0.22, 0.42, 0.68, 1.0];
+    fr.forEach((f, i) => {
+      loadBrush('Ultram.', f, 0.55);
+      const x = 40 + i * 140;
+      line(x, y, x + 110, y, 14);
+    });
+    dryOut();
+    grab();
+    const depths = fr.map((f, i) => depthOf(stats(40 + i * 140 + 20, y - 10, 70, 20).mean));
+    RESULT.panels.valueLadder = {
+      paintFrac: fr, depth: depths.map((d) => +d.toFixed(2)),
+      monotonic: depths.every((d, i) => i === 0 || d > depths[i - 1] * 1.06),
+      topDepth: +depths[depths.length - 1].toFixed(2),
+      spread: +(depths[depths.length - 1] / Math.max(depths[0], 1e-3)).toFixed(1),
+    };
+  }
+
+  // 1. WATER LADDER — same paint, water from bone dry to dripping.
+  //    The tell, after the redesign: value must stay PUT while the mark
+  //    changes character. Wetter spreads further and softens; it must not
+  //    turn the colour down.
+  {
+    // The ORDINARY painting range, deliberately. A brush at 0.15 water is a
+    // dry brush and it is supposed to deposit less and skip — that is a tell
+    // in its own right and it has its own panel below. Sweeping this ladder
+    // from bone dry to dripping measured the dry-brush effect and called it a
+    // failure of the water rule, which confused two different things.
+    const y = panelY(1), wr = [0.45, 0.6, 0.75, 0.95];
+    wr.forEach((w, i) => {
+      loadBrush('Ultram.', 0.45, w);
+      const x = 60 + i * 210;
+      line(x, y, x + 150, y, 14);
+    });
+    dryOut();
+    grab();
+    // Two different windows on purpose. Value is read down the middle of the
+    // stroke, where there is paint in every case; spread is read from the
+    // whole band. Reading both off the wide window mixed them together — a
+    // wetter stroke covers more of the window, which reads as "darker" even
+    // when the paint where it lands is exactly as strong.
+    const cells = wr.map((w, i) => stats(60 + i * 210 + 30, y - 26, 90, 52));
+    const cores = wr.map((w, i) => stats(60 + i * 210 + 30, y - 4, 90, 8));
+    const depths = cores.map((c) => depthOf(c.mean));
+    RESULT.panels.waterLadder = {
+      water: wr,
+      depth: depths.map((d) => +d.toFixed(2)),
+      covered: cells.map((c) => +c.covered.toFixed(3)),
+      // how much the value drifts across the whole water range: should be small
+      valueDrift: +(Math.max(...depths) / Math.max(Math.min(...depths), 1e-3)).toFixed(2),
+      // how much more paper a wet brush covers: should be clearly more than 1
+      spreadGain: +(Math.max(...cells.map((c) => c.covered))
+                    / Math.max(Math.min(...cells.map((c) => c.covered)), 1e-3)).toFixed(2),
+    };
+  }
+
+  // 2. GLAZING — one, two, three, four passes of the same dilute paint over
+  //    dry paper, re-dipping each time. The tell: transparent layers that
+  //    build value gradually. If pass two is already at mass tone, glazing is
+  //    impossible and every painting comes out potent.
+  {
+    const y = panelY(2);
+    for (let passes = 1; passes <= 4; passes++) {
+      const x = 60 + (passes - 1) * 210;
+      for (let k = 0; k < passes; k++) {
+        // glaze consistency — properly let down, not a mid wash
+        loadBrush('Pyrrole', 0.15, 0.55);
+        line(x, y, x + 150, y, 14);
+        dryOut();
+      }
+    }
+    grab();
+    const depths = [1, 2, 3, 4].map((p) => depthOf(stats(60 + (p - 1) * 210 + 30, y - 10, 90, 20).mean));
+    RESULT.panels.glaze = {
+      depth: depths.map((d) => +d.toFixed(2)),
+      // each glaze should still add something, but less than the one before
+      steps: depths.map((d, i) => +(d - (i ? depths[i - 1] : 0)).toFixed(2)),
+      buildsGradually: depths[0] < 1.2 && depths[3] > depths[0] * 1.8,
+    };
+  }
+
+  // 3. HARD vs SOFT EDGE — the same stroke onto dry paper, and into a wet
+  //    patch. Both in one picture is the single most recognisable watercolour
+  //    tell there is.
+  {
+    const y = panelY(3);
+    loadBrush('Ultram.', 0.5, 0.5);
+    line(120, y, 260, y, 16);
+    // A patch wide enough that the stroke's own left edge sits well inside
+    // it: the first version scanned across the patch's rim as well as the
+    // stroke's, so it was comparing a soft edge against two edges at once.
+    wetPatch(600, y, 130, 0.95);
+    run(40);
+    loadBrush('Ultram.', 0.5, 0.5);
+    line(600, y, 720, y, 16);
+    dryOut();
+    grab();
+    const hard = edgeSharpness(96, y - 4, 60, 8);
+    const soft = edgeSharpness(576, y - 4, 60, 8);
+    RESULT.panels.edges = {
+      hard: +hard.toFixed(1), soft: +soft.toFixed(1),
+      ratio: +(hard / Math.max(soft, 0.5)).toFixed(2),
+      distinct: hard > soft * 1.6,
+    };
+  }
+
+  // 4. BACKRUN — clean water into a wash that has lost its shine. The
+  //    cauliflower. Measured as roughness inside the bloom: a backrun is a
+  //    ragged pale hole with a dark rim, so the patch gets LESS uniform.
+  {
+    const y = panelY(4);
+    loadBrush('Ultram.', 0.45, 0.9);
+    for (let k = -1; k <= 1; k++) line(120, y + k * 12, 360, y + k * 12, 18);
+    // Long enough to lose its shine: a backrun needs the wash to be damp and
+    // setting, not still swimming. 700 steps left it wet and the drop simply
+    // merged in, which measured as "no backrun" when it was really "too soon".
+    run(1600);
+    const before = (grab(), stats(180, y - 26, 130, 52));
+    BRUSH.pig.fill(0);
+    BRUSH.water = 1.0;
+    const empty = new Float32Array(N_CHANNELS);
+    sim.splat(240, y, 34, 0.095, empty, 1.0, 0);
+    sim.rewet();
+    // A cauliflower takes time to open. Dropping the water and immediately
+    // drying at 120x gave the bloom no chance to form and then measured its
+    // absence, which is a stopwatch fault rather than a physics one.
+    run(900);
+    dryOut();
+    grab();
+    const after = stats(180, y - 26, 130, 52);
+    RESULT.panels.backrun = {
+      sdBefore: +before.sd.toFixed(2), sdAfter: +after.sd.toFixed(2),
+      roughening: +(after.sd / Math.max(before.sd, 0.5)).toFixed(2),
+      happened: after.sd > before.sd * 1.25,
+    };
+  }
+
+  // 5. GRANULATION — a heavy pigment settling into the tooth beside a
+  //    staining one that does not. The tell is the DIFFERENCE: if both are
+  //    equally speckled the granulation is just noise on the render.
+  {
+    const y = panelY(5);
+    loadBrush('Gran. Bk', 0.5, 0.8);
+    for (let k = -1; k <= 1; k++) line(90, y + k * 14, 330, y + k * 14, 20);
+    loadBrush('Phthalo', 0.5, 0.8);
+    for (let k = -1; k <= 1; k++) line(520, y + k * 14, 760, y + k * 14, 20);
+    dryOut();
+    grab();
+    const g = stats(140, y - 24, 150, 48), s = stats(570, y - 24, 150, 48);
+    RESULT.panels.granulation = {
+      granulatingSd: +g.sd.toFixed(2), stainingSd: +s.sd.toFixed(2),
+      ratio: +(g.sd / Math.max(s.sd, 0.5)).toFixed(2),
+      distinct: g.sd > s.sd * 1.5,
+    };
+  }
+
+  // 6. DRY BRUSH — a nearly-dry brush on rough paper skips the valleys and
+  //    catches the tooth. The tell is broken coverage, and the fact that the
+  //    white in the gaps is the PAPER.
+  {
+    const y = panelY(6);
+    sim.setPaper('rough');
+    loadBrush('Gran. Bk', 0.6, 0.12);
+    line(90, y, 700, y, 18, 0.35);
+    dryOut();
+    grab();
+    const c = stats(120, y - 14, 500, 28);
+    // Counted at a threshold that means "actually painted" rather than
+    // "touched at all": a dry brush lays a faint film everywhere and real
+    // colour only on the tooth, so the loose threshold reported 95% coverage
+    // for a mark that is plainly broken to the eye.
+    RESULT.panels.dryBrush = {
+      covered: +c.covered.toFixed(3), painted: +c.painted.toFixed(3),
+      sd: +c.sd.toFixed(2), skips: +(1 - c.painted).toFixed(3),
+      broken: c.painted > 0.04 && c.painted < 0.8,
+    };
+  }
+
+  // 7. ONE LOAD — how far a single dip actually goes, and how it fades. This
+  //    is the budget made visible: value at the start, in the middle and at
+  //    the end of one uninterrupted stroke.
+  {
+    const y = panelY(7);
+    sim.setPaper('coldpress');
+    loadBrush('Ultram.', 1.0, 0.6);
+    // a long boustrophedon so a whole dip's worth of travel fits the panel
+    let yy = y - 18;
+    for (let row = 0; row < 4; row++, yy += 12) {
+      if (row % 2 === 0) line(60, yy, 840, yy, 9);
+      else line(840, yy, 60, yy, 9);
+    }
+    dryOut();
+    grab();
+    const start = depthOf(stats(70, y - 24, 60, 12).mean);
+    const end = depthOf(stats(700, y + 12, 100, 12).mean);
+    RESULT.panels.oneLoad = {
+      startDepth: +start.toFixed(2), endDepth: +end.toFixed(2),
+      fade: +(start / Math.max(end, 1e-3)).toFixed(2),
+      leftOnBrush: +BRUSH.frac().toFixed(3),
+      runsOut: end < start * 0.6,
+    };
+  }
+
+  RESULT.build = typeof BUILD !== 'undefined' ? BUILD.build : null;
+  RESULT.paperL = +paperL.toFixed(1);
+  return RESULT;
+}
+
+window.__tells = paintSheet;
+window.__ready = true;
+</script>

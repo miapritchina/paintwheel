@@ -127,7 +127,6 @@ ${RP.map((i) => `uniform vec4 uPig${i};`).join('\n')}
 uniform float uWetness;
 uniform float uPush;
 uniform float uScrub;
-uniform float uPigSpread;
 layout(location=0) out vec4 oFlow;
 ${RP.map((i) => `layout(location=${i + 1}) out vec4 oSusp${i};`).join('\n')}
 
@@ -143,20 +142,26 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);`).join('\n')}
   // Dry-brush: with little water the brush only touches the raised tooth of
   // the paper; with lots of water it floods the valleys too.
   float contact = smoothstep(pap.x - 0.55, pap.x + 0.1, uWetness * 1.25 + 0.15);
-  m *= mix(contact, 1.0, smoothstep(0.75, 1.0, uWetness));
+  // Full contact well before the brush is dripping. This gate is the ONLY
+  // remaining route from water to value, and it used to stay open until a
+  // wetness of 0.75-1.0 — which meant that across the ordinary working range
+  // of the water slider a drier brush simply deposited less paint, a 5.7x
+  // swing in the measured value ladder. Dry-brush skipping is a real effect
+  // and worth keeping, but it belongs to a genuinely dry brush, not to two
+  // thirds of the slider.
+  m *= mix(contact, 1.0, smoothstep(0.30, 0.55, uWetness));
   m *= 0.75 + 0.5 * pap.z;
 
-  // The brush carries a fixed mass of pigment; the water decides what that
-  // mass is dissolved IN. A wetter brush lays the same pigment through a
-  // bigger, deeper film, so every square millimetre gets less of it — that
-  // is what dilution is, and without it the water control changed only how
-  // far a stroke crept, never how strong it looked.
-  float pr = length(d) / max(uRadius * max(uPigSpread, 1.0), 1e-5);
-  float pm = 1.0 - smoothstep(0.3, 1.0, pr);
-  pm *= mix(contact, 1.0, smoothstep(0.75, 1.0, uWetness));
-  pm *= (0.75 + 0.5 * pap.z) / (uPigSpread * uPigSpread);
+  // uPig is a peak optical depth, already worked out on the CPU so that this
+  // dab lays exactly the mass the brush gave up (see js/brush.js — the
+  // profile below integrates to 0.447 * pi * R^2, which is the constant that
+  // inversion uses). The water does NOT scale it: how wet the brush is
+  // decides how far the paint then travels, not how dark it is where it
+  // lands. The two used to be tangled together here and it made every
+  // setting look like every other setting.
+  float pm = m;
 
-  if (m > 0.0 || pm > 0.0) {
+  if (m > 0.0) {
     f.x += uWaterAmt * m;
     f.w = max(f.w, smoothstep(0.0, 0.08, m * uWaterAmt * 40.0));
     // outward shove where the dab lands on already-wet paper

@@ -32,58 +32,23 @@
   const NPIG = N_CHANNELS; // brush carries per-CHANNEL loads
 
   // -------------------------------------------------------------- brush ---
-  // Two INDEPENDENT quantities, and nothing couples them:
-  //   water  - how much fluid the hairs carry (0 bone dry .. 1 dripping).
-  //            This alone decides how wet the paper gets.
-  //   pig[]  - how much pigment sits on the hairs. This alone decides how
-  //            strong the colour is.
-  // Every water control leaves the paint exactly as it was, and every paint
-  // control leaves the water alone. The simulated versions of these — a wet
-  // brush dissolving more out of a pan, a water dip washing pigment off —
-  // were true to life but made the two knobs fight each other, so they are
-  // gone, and so are the buttons that only ever moved the water slider.
-  const brush = {
-    water: 0.6,
-    pig: new Float32Array(NPIG),
-  };
+  // The paint model lives in js/brush.js so it can be measured on its own.
+  // Two quantities, with one rule each:
+  //   water  - how much fluid the hairs carry. Decides how far paint travels,
+  //            how soft the edges are and how long the wash stays open. It
+  //            NEVER decides how dark the paint is.
+  //   pig[]  - the MASS of pigment on the hairs. This alone is the value
+  //            axis, and a dab takes mass off the brush to put it on the
+  //            sheet, so the brush is a budget rather than a fountain.
+  const brush = BRUSH;
   window.brush = brush;
-
-  const PIG_CAP = 1.2; // pigment load of a fully charged brush
-
-  // Dilution = the pigment:water ratio on the hairs. This is the paint's
-  // *value* axis, independent of how much water the brush carries.
-  function dilutionRatio() {
-    return brushTotal() / (brushTotal() + 2.2 * brush.water + 1e-6);
-  }
-
-  // Zbukvic's consistency scale, read off that ratio.
-  function consistency(r = dilutionRatio()) {
-    if (brushTotal() < 0.015) return brush.water > 0.05 ? 'clean water' : 'dry, empty';
-    if (r > 0.78) return 'butter';
-    if (r > 0.55) return 'cream';
-    if (r > 0.33) return 'milk';
-    if (r > 0.16) return 'coffee';
-    return 'tea';
-  }
-
-  // Scale the whole pigment load to a new total, keeping the mixture's
-  // proportions (so its hue and physical character are untouched).
-  function setPaintLoad(target) {
-    const t = brushTotal();
-    if (t < 1e-5) return;
-    const k = Math.max(target, 0) / t;
-    for (let i = 0; i < NPIG; i++) brush.pig[i] *= k;
-  }
 
   const brushcursor = document.getElementById('brushcursor');
   const pignameEl = document.getElementById('pigname');
   const consistencyEl = document.getElementById('consistency');
 
-  function brushTotal() {
-    let t = 0;
-    for (let i = 0; i < NPIG; i++) t += brush.pig[i];
-    return t;
-  }
+  // How full the brush is, 0..1 — what the UI works in.
+  const brushFrac = () => brush.frac();
 
   // ------------------------------------------------- live brush sliders ---
   // Two sliders, one per axis. There was a third for dilution — the ratio of
@@ -98,7 +63,7 @@
     // Squared, not linear. Colour depth saturates fast: on a measured ladder
     // the whole readable range from a tint to a mass tone lived in the first
     // third of a linear slider, and everything above it looked the same.
-    const target = Math.pow(Number(paintSl.value) / 100, 2) * PIG_CAP;
+    const target = Math.pow(Number(paintSl.value) / 100, 2) * brush.PIG_CAP;
     if (partsTotal() <= 0) { updateBrushView('Tap a pan first — no colour to load'); return; }
     applyMix(target); // keeps the recipe, changes only how much of it
     updateBrushView(`Paint ${paintSl.value}%`);
@@ -155,9 +120,9 @@
   }
 
   function renderMixStroke() {
-    const total = brushTotal();
-    strokeCanvas.classList.toggle('on', total > 0.01);
-    if (total <= 0.01) return;
+    const total = brushFrac();
+    strokeCanvas.classList.toggle('on', total > 0.008);
+    if (total <= 0.008) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cssW = strokeCanvas.clientWidth || 420;
     const W = Math.max(60, Math.round(cssW * dpr));
@@ -177,11 +142,14 @@
       const p = CHANNELS[i];
       gamma.push(p ? p.gamma : 0);
       grain.push(p ? p.grain : 0);
-      share.push(brush.pig[i]);
+      // proportions of the mixture; `depth` below carries the strength
+      share.push(brush.pig[i] / (brush.total() || 1));
     }
     // a stroke: full strength at the left, running out to a thin dry-brush
-    // tail at the right, with the darker rim a drying edge leaves
-    const depth = 2.6 * Math.min(total / PIG_CAP, 1);
+    // tail at the right, with the darker rim a drying edge leaves.
+    // 2.6 is the optical depth a full dip actually lays on the sheet, so the
+    // strip is a preview of the stroke rather than a decorative swatch.
+    const depth = 2.6 * total;
     for (let x = 0; x < W; x++) {
       const xn = x / (W - 1);
       // a hand-drawn line, not a bar: the centre wanders and the stroke
@@ -224,20 +192,20 @@
   }
 
   function updateBrushView(msg) {
-    const total = brushTotal();
+    const total = brushFrac();
     // the colour still drives the brush cursor on the paper
-    const color = total > 0.01 ? CHANNELS.kmColor(brush.pig, 1.5 + 12 * Math.min(total, 1.2)) : 'rgb(238,236,230)';
+    const color = total > 0.008 ? CHANNELS.kmColor(brush.pig, 1.5 + 12 * total) : 'rgb(238,236,230)';
     // the sliders double as the level meters: writing them back keeps the
     // display honest whichever way the brush was changed (pan, slider, stroke)
     sliderEcho = true;
     // squared going in, so square-rooted coming back out — otherwise the
     // meter and the control it doubles as disagree about the same load
-    paintSl.value = String(Math.round(Math.sqrt(Math.min(total / PIG_CAP, 1)) * 100));
+    paintSl.value = String(Math.round(Math.sqrt(total) * 100));
     waterSl.value = String(Math.round(brush.water * 100));
     sliderEcho = false;
     paintSl.style.setProperty('--fill', color);
-    brushcursor.style.background = total > 0.01 ? color.replace('rgb', 'rgba').replace(')', ',0.35)') : 'rgba(200,220,255,0.2)';
-    consistencyEl.textContent = consistency();
+    brushcursor.style.background = total > 0.008 ? color.replace('rgb', 'rgba').replace(')', ',0.35)') : 'rgba(200,220,255,0.2)';
+    consistencyEl.textContent = brush.consistency();
     renderMixStroke();
     if (msg !== undefined) pignameEl.textContent = msg;
   }
@@ -263,18 +231,15 @@
     return t;
   }
 
-  // Restate the brush's pigment as the recipe, keeping however much paint is
-  // already on it (or a starting dose if it was empty).
   // Restate the brush's pigment as the recipe. How MUCH paint is on the
   // brush is its own quantity — set by the Paint slider, carried over when
-  // the recipe changes, and defaulting to the "paint per dip" setting when
+  // the recipe changes, and defaulting to the "first tap loads" setting when
   // the brush was empty. Water is never consulted.
   function applyMix(load) {
-    const tot = partsTotal();
-    if (tot <= 0) { brush.pig.fill(0); return; }
+    if (partsTotal() <= 0) { brush.pig.fill(0); return; }
     const amount = load != null ? load
-      : (brushTotal() > 0.01 ? brushTotal() : Math.min(PIG_CAP, SET.pickup));
-    for (let i = 0; i < NPIG; i++) brush.pig[i] = (PARTS[i] / tot) * amount;
+      : (brush.total() > 0.008 * brush.PIG_CAP ? brush.total() : SET.pickup * brush.PIG_CAP);
+    brush.setRecipe(PARTS, amount);
   }
 
   function mixText() {
@@ -530,11 +495,17 @@
     if (log) LOGBOOK.log('drying', { v: Number(dryingEl.value) });
   }
   function applySettings(log = true) {
-    SET.pickup = Number(pickupEl.value) / 100 * 1.6;
+    SET.pickup = Number(pickupEl.value) / 100; // fraction of a full dip
     SET.saltGrain = Number(saltsizeEl.value) / 100 * 6.0;
     SET.runoff = runoffEl.checked;
     SET.pressureSize = pressEl.checked;
+    // "The brush runs out" is now the law rather than a tuning knob: a dab
+    // takes its paint off the hairs. The switch chooses between paying for it
+    // and not — off, the hairs hold their load and every line comes out the
+    // same however many you draw, which is the opposite of a real brush and
+    // exactly why it stays a choice (flat colour, long even lines).
     SET.deplete = depleteEl.checked;
+    brush.releaseMode = SET.deplete ? 'real' : 'never';
     // 0..4x. The old ceiling was 2x and the log shows it pinned there twice,
     // so the top of the dial was the answer rather than a limit.
     SET.tiltStrength = (Number(tiltStrEl.value) / 100) * 4;
@@ -942,56 +913,44 @@
     return base * (1 - r * 0.85 + pressure * r * 1.5);
   }
 
-  function dab(x, y, pressure) {
+  // One dab. `advance` is how far the brush travelled to get here, and it is
+  // what the paint model charges for: a dab is not a fraction of the load, it
+  // is the paint released over that much travel, and the brush loses exactly
+  // that. Two consequences worth naming, because they are the whole point:
+  // painting over the same line twice no longer doubles the colour, and a
+  // stroke fades to a dry-brush tail without anything being faked.
+  function dab(x, y, pressure, advance) {
     DEMO.stop();
     const size = brushSize(pressure);
-    const total = brushTotal();
-    // Water delivered depends ONLY on how wet the brush is — a bone-dry
-    // brush wets the paper not at all, however much paint it carries.
-    const water = 0.055 * brush.water * (0.5 + 0.5 * pressure);
-    // Pigment delivered depends ONLY on the paint on the hairs.
-    const amount = 0.4 * (0.4 + 0.6 * pressure);
-    for (let i = 0; i < NPIG; i++) pigDep[i] = brush.pig[i] * amount;
-    // clean damp brush lifts pigment instead of depositing
-    const scrub = total < 0.02 ? 0.08 * pressure * brush.water : 0;
-    sim.splat(x, y, size, water, pigDep, brush.water, scrub);
-    // ...and a clean brush carrying real water re-dissolves paint that has
-    // only just set, which is how a bloom starts. The water-drop tool used
-    // to be the only way to ask for this.
-    if (total < 0.02 && brush.water > 0.35) sim.rewet();
-  }
-
-  function deplete(dist) {
-    // With depletion switched off the hairs hold their load: every line
-    // comes out the same however many you draw. Handy for flat colour and
-    // for long even lines, and the opposite of how a real brush behaves —
-    // which is exactly why it is a choice.
-    if (!SET.deplete) return;
-    // Water leaves faster than pigment (the paper drinks it), so a long
-    // stroke gets progressively drier and more concentrated before it
-    // finally runs out — the natural drybrush tail.
-    brush.water *= Math.exp(-dist / 900);
-    const k = Math.exp(-dist / 1600);
-    for (let i = 0; i < NPIG; i++) brush.pig[i] *= k;
+    const wasLoaded = brushFrac();
+    const d = brush.dab(advance, size, pressure, pigDep);
+    sim.splat(x, y, size, d.water, d.amp, d.wetness, d.scrub);
+    // a clean brush carrying real water re-dissolves paint that has only just
+    // set, which is how a bloom starts
+    if (wasLoaded < 0.015 && brush.water > 0.35) sim.rewet();
   }
 
   function strokeTo(x, y, pressure) {
-    if (!last) { dab(x, y, pressure); last = { x, y }; return; }
+    // The very first touch of a stroke has travelled nowhere, so it is
+    // charged for a step's worth of paint rather than nothing — otherwise a
+    // tap would leave no mark at all.
+    const stepLen = Math.max(Number(sizeEl.value) * 0.3, 2);
+    if (!last) { dab(x, y, pressure, stepLen); last = { x, y }; return; }
     const dx = x - last.x, dy = y - last.y;
     const dist = Math.hypot(dx, dy);
-    const stepLen = Math.max(Number(sizeEl.value) * 0.3, 2);
     // A pen held still still reports samples, and each one used to become a
     // dab on the same spot: in one recorded session 31% of all dabs landed
     // less than a third of a step from the one before. That is not paint the
     // artist asked for, it is just fill rate — and heat. Hold the position
     // until the brush has actually moved.
     if (dist < stepLen * 0.34) return;
-    deplete(dist);
+    brush.dry(dist);
     const n = Math.floor(dist / stepLen);
+    const advance = dist / (n + 1); // each dab pays for its own share of the travel
     for (let i = 1; i <= n; i++) {
-      dab(last.x + (dx * i) / (n + 1), last.y + (dy * i) / (n + 1), pressure);
+      dab(last.x + (dx * i) / (n + 1), last.y + (dy * i) / (n + 1), pressure, advance);
     }
-    dab(x, y, pressure);
+    dab(x, y, pressure, advance);
     last = { x, y };
   }
 
@@ -1062,7 +1021,9 @@
         channels: CHANNELS.map((c) => (c ? c.id : null)),
         pans: PANS.map((p) => ({ id: p.paint.id, chan: p.chan })),
         colours: PANS.length,
-        brush: { water: brush.water, pig: Array.from(brush.pig) },
+        // stored as fractions of a full dip, so the mass units in brush.js
+        // can be re-tuned without invalidating a saved session
+        brush: { water: brush.water, pig: Array.from(brush.pig, (v) => v / brush.PIG_CAP) },
         parts: Array.from(PARTS),
         drying: Number(dryingEl.value),
         settings: {
@@ -1095,7 +1056,11 @@
       if (st.painting) sim.writeDeposits(st.painting);
       if (st.brush) {
         brush.water = st.brush.water;
-        brush.pig.set(st.brush.pig.slice(0, NPIG));
+        const p = st.brush.pig.slice(0, NPIG);
+        // sessions saved before the brush held a mass carry raw old-unit
+        // loads (0..1.2); anything that big cannot be a fraction, so rescale
+        const old = p.reduce((a, v) => a + v, 0) > 1.0001;
+        brush.pig.set(p.map((v) => (old ? v / 1.2 : v) * brush.PIG_CAP));
       }
       if (st.parts) { PARTS.set(st.parts.slice(0, NPIG)); refreshParts(); }
       if (st.drying != null) { dryingEl.value = st.drying; applyDrying(false); }
@@ -1155,5 +1120,5 @@
   }
   requestAnimationFrame(frame);
   window.__uv = updateBrushView; // for the console and automated tests
-  updateBrushView('Dip a pan for paint, 💧 for water — they are separate. 🌀 rinses, 🧽 blots water off.');
+  updateBrushView('Tap a pan for colour. 🎨 is how much paint, 💧 how much water — water moves the paint, it never darkens it. 🌀 rinses.');
 })();

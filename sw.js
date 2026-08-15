@@ -12,6 +12,7 @@ const ASSETS = [
   './js/store.js',
   './js/shaders.js',
   './js/sim.js',
+  './js/brush.js',
   './js/demo.js',
   './js/main.js',
   './icons/icon-192.png',
