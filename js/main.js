@@ -105,6 +105,11 @@
     brush.water = Number(waterSl.value) / 100; // paint is not touched
     updateBrushView(`Water ${waterSl.value}%`);
   });
+  // Log where these two land, once the finger lets go. Without this a session
+  // log shows pigment collapsing mid-painting with nothing to explain it —
+  // the two controls that decide every stroke were the only ones invisible.
+  paintSl.addEventListener('change', () => LOGBOOK.log('load', { paint: Number(paintSl.value) }));
+  waterSl.addEventListener('change', () => LOGBOOK.log('load', { water: Number(waterSl.value) }));
 
   // ------------------------------------------------- the mix, as a stroke --
   // A swatch of flat colour cannot show what a watercolour actually does:
@@ -326,11 +331,11 @@
   //   long press      take it out of the mix
   // Dragging is the important one — a proportion is something you feel your
   // way to, and tapping seven times to correct one part is not that.
-  const PART_PX = 20;   // pixels of drag per part
+  const PART_PX = 14;   // pixels of drag per part (20 parts in one screen-height drag)
   const PART_MAX = 20;
 
   function panGesture(el, i) {
-    let active = false, startY = 0, startParts = 0, changed = false, held = null;
+    let active = false, startY = 0, startX = 0, startParts = 0, changed = false, held = null;
 
     const commit = (why) => {
       refreshParts();
@@ -342,21 +347,26 @@
     el.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       active = true; changed = false;
-      startY = e.clientY;
+      startY = e.clientY; startX = e.clientX;
       startParts = PARTS[i];
       try { el.setPointerCapture(e.pointerId); } catch { /* mouse w/o capture */ }
       held = setTimeout(() => {
         if (changed) return;
-        changed = true; // a long press consumes the tap
+        changed = true; held = null; // a long press consumes the tap
         PARTS[i] = 0;
         commit('hold');
-      }, 500);
+      }, 600);
     });
 
     el.addEventListener('pointermove', (e) => {
       if (!active) return;
       e.preventDefault();
       const dy = startY - e.clientY; // up is more
+      // Kill the long press the moment the finger moves at all, not only once
+      // it has travelled far enough to count as a drag. A slow drag — down,
+      // pause, then move — used to trip the 500ms timer first and zero the
+      // pan, and the drag that followed put the old value straight back.
+      if (Math.hypot(e.clientX - startX, dy) > 3) clearTimeout(held);
       if (!changed && Math.abs(dy) < 6) return;
       clearTimeout(held);
       const next = Math.max(0, Math.min(PART_MAX, Math.round(startParts + dy / PART_PX)));
@@ -373,7 +383,7 @@
       if (!changed) { // a plain tap adds one part
         PARTS[i] = Math.min(PART_MAX, PARTS[i] + 1);
         commit('tap');
-      } else {
+      } else if (held !== null) { // a long press already reported itself
         LOGBOOK.log('parts', { pan: i, name: PANS[i].paint.name, parts: PARTS[i], how: 'drag', mix: mixText() });
       }
     };
@@ -554,11 +564,13 @@
     battery:  { maxSim: 576,  dpr: 1.0 },
   };
 
-  // Drying speed: slider 0..100 -> 0.25x .. 4x around the base rate, so the
-  // sheet can be kept open for minutes or pushed to dry in seconds.
+  // Drying speed: 0.0625x .. 4x around the base rate, hinged at the slider's
+  // default so the middle of the dial keeps its old feel. The bottom half used
+  // to bottom out at half the default, which is not slow: a session log shows
+  // the slider driven down to 5 and left there, still asking for slower.
   function applyDrying(log = true) {
-    const t = Number(dryingEl.value) / 100;
-    sim.params.dryScale = 0.25 * Math.pow(16, t);
+    const v = Number(dryingEl.value);
+    sim.params.dryScale = 0.5 * Math.pow(8, (v - 30) / (v <= 30 ? 30 : 70));
     if (log) LOGBOOK.log('drying', { v: Number(dryingEl.value) });
   }
   function applySettings(log = true) {
@@ -568,7 +580,9 @@
     SET.runoff = runoffEl.checked;
     SET.pressureSize = pressEl.checked;
     SET.deplete = depleteEl.checked;
-    SET.tiltStrength = (Number(tiltStrEl.value) / 100) * 2;
+    // 0..4x. The old ceiling was 2x and the log shows it pinned there twice,
+    // so the top of the dial was the answer rather than a limit.
+    SET.tiltStrength = (Number(tiltStrEl.value) / 100) * 4;
     SET.pressRange = Number(pressRangeEl.value) / 100;
     const q = QUALITY[qualityEl.value] || QUALITY.balanced;
     sim.setQuality(q.maxSim, q.dpr);
@@ -1006,8 +1020,14 @@
     if (!last) { dab(x, y, pressure); last = { x, y }; return; }
     const dx = x - last.x, dy = y - last.y;
     const dist = Math.hypot(dx, dy);
-    deplete(dist);
     const stepLen = Math.max(Number(sizeEl.value) * 0.3, 2);
+    // A pen held still still reports samples, and each one used to become a
+    // dab on the same spot: in one recorded session 31% of all dabs landed
+    // less than a third of a step from the one before. That is not paint the
+    // artist asked for, it is just fill rate — and heat. Hold the position
+    // until the brush has actually moved.
+    if (dist < stepLen * 0.34) return;
+    deplete(dist);
     const n = Math.floor(dist / stepLen);
     for (let i = 1; i <= n; i++) {
       dab(last.x + (dx * i) / (n + 1), last.y + (dy * i) / (n + 1), pressure);
