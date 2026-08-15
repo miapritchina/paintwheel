@@ -230,7 +230,9 @@
     // the sliders double as the level meters: writing them back keeps the
     // display honest whichever way the brush was changed (pan, slider, stroke)
     sliderEcho = true;
-    paintSl.value = String(Math.round(Math.min(total / PIG_CAP, 1) * 100));
+    // squared going in, so square-rooted coming back out — otherwise the
+    // meter and the control it doubles as disagree about the same load
+    paintSl.value = String(Math.round(Math.sqrt(Math.min(total / PIG_CAP, 1)) * 100));
     waterSl.value = String(Math.round(brush.water * 100));
     sliderEcho = false;
     paintSl.style.setProperty('--fill', color);
@@ -395,18 +397,19 @@
   // same knob, so they are gone. 🌀 is the one brush action left that the
   // sliders cannot express.
   document.getElementById('clean').addEventListener('pointerdown', () => {
-    // Rinse takes the COLOUR off the hairs and nothing else — water is the
-    // water slider's business, and rinsing used to empty it too.
+    // Rinse takes the colour off the hairs AND out of the pans. Water is the
+    // water slider's business and is left alone.
     //
-    // The recipe survives as well. A session log showed the cost of clearing
-    // it: after a rinse the artist made 592 more dabs, every one of them
-    // carrying no colour at all, painting clean water over the picture and
-    // then trying to dry it off. Keeping the mix means the next tap on any
-    // pan brings the whole recipe back, and the preview strip vanishing is
-    // the signal that the brush is empty.
+    // The recipe used to survive a rinse, which left the palette showing a
+    // mix — badges lit, preview strip up — that the brush did not have. A
+    // session log caught what that costs: 592 dabs after a rinse, every one
+    // of them carrying no colour at all. The pans going dark is the honest
+    // signal that the brush is empty.
     brush.pig.fill(0);
+    PARTS.fill(0);
+    refreshParts();
     LOGBOOK.log('clean', { water: Math.round(brush.water * 100) / 100 });
-    updateBrushView('Rinsed — colour off, water untouched');
+    updateBrushView('Rinsed — pans cleared, water untouched');
   });
 
   // ----------------------------------------------------------- controls ---
