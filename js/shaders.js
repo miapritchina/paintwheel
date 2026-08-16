@@ -5,13 +5,14 @@
 //                  relief, Marangoni bloom term, tilt gravity, rim drift
 //   2. height    - continuity: conservative upwind fluxes of h*vel
 //   3. moisture  - evaporation (boosted at wash edges -> edge darkening),
-//                  absorption into the capillary layer of the paper
-//   4. capillary - fiber wicking; damp cells re-wetted by an advancing wet
-//                  front rejoin the wet mask (backruns)
-//   5. advect    - semi-Lagrangian transport + diffusion of suspended pigment
-//   6. transfer  - pigment deposition onto / lifting off the paper, with
-//                  per-pigment density, staining and granulation
-//   7. render    - Kubelka-Munk optical compositing of 16 pigment channels
+//                  absorption into the capillary layer of the paper, fiber
+//                  wicking, and damp cells re-wetted by an advancing wet
+//                  front rejoining the wet mask (backruns) — one merged pass
+//   4. advect    - semi-Lagrangian transport + diffusion of suspended pigment
+//   5. transfer  - pigment deposition onto / lifting off the paper, with
+//                  per-pigment density, staining and granulation (one draw
+//                  when the device has 2*NP MRT attachments, else two)
+//   6. render    - Kubelka-Munk optical compositing of the pigment channels
 //                  over textured paper, plus wet-sheen shading
 //
 // Pigment state lives in PIG_TEXTURES (=4) RGBA texture pairs for suspended
@@ -294,6 +295,14 @@ void main() {
 }`;
 
 // ------------------------------------------------------------- moisture ----
+// Evaporation + absorption + capillary wicking + backruns, ONE pass. These
+// were two passes (moisture, then capillary), each writing and re-reading
+// the full flow+sat state every substep; merged, the capillary half works on
+// this cell's just-updated state in registers while its neighbours are one
+// substep stale. The per-substep rates are tiny, so the staleness (and the
+// slight asymmetry it gives the pairwise wick exchange) is far below
+// anything visible — and a whole full-screen write+read round trip per
+// substep is gone.
 SHADERS.moisture = `#version 300 es
 ${COMMON}
 uniform sampler2D uFlow;
@@ -305,6 +314,9 @@ uniform float uAbsorb;
 uniform float uRunAbsorb;
 uniform float uSatEvap;
 uniform float uWetThresh;
+uniform float uWick;
+uniform float uWickThresh;
+uniform float uBackrun;
 layout(location=0) out vec4 oFlow;
 layout(location=1) out vec4 oSat;
 
@@ -358,27 +370,12 @@ void main() {
     s.z = max(s.z - uDt * 0.0007 * smoothstep(0.0005, 0.01, h + soak), 0.0);
   }
 
-  oFlow = vec4(h, f.yz, w);
-  oSat = s;
-}`;
-
-// ------------------------------------------------------------ capillary ----
-SHADERS.capillary = `#version 300 es
-${COMMON}
-uniform sampler2D uFlow;
-uniform sampler2D uSat;
-uniform sampler2D uPaper;
-uniform float uWick;
-uniform float uWickThresh;
-uniform float uBackrun;
-layout(location=0) out vec4 oFlow;
-layout(location=1) out vec4 oSat;
-
-void main() {
-  vec4 f = texture(uFlow, vUV);
-  vec4 s = texture(uSat, vUV);
-  float cap = texture(uPaper, vUV).y;
-
+  // Capillary wicking between fibers. Paper is not a homogeneous sponge:
+  // wicking runs along fiber bundles and stalls between them (Darcy flow
+  // through a heterogeneous medium), which is why a damp fringe creeps out
+  // ragged and feathered instead of as a smooth blurred halo. Each exchange
+  // is weighted by the fiber noise of BOTH cells — the pair average keeps
+  // the exchange symmetric, so heterogeneity cannot create or destroy water.
   float transfer = 0.0;
   float wetNbr = 0.0;
   for (int k = 0; k < 4; k++) {
@@ -386,9 +383,10 @@ void main() {
              : k == 2 ? vec2(0.0, uTexel.y) : vec2(0.0, -uTexel.y);
     float sn = texture(uSat, vUV + off).x;
     vec4 fn = texture(uFlow, vUV + off);
+    float wmod = 0.35 + 0.65 * (pap.z + texture(uPaper, vUV + off).z);
     wetNbr = max(wetNbr, fn.w * smoothstep(0.001, 0.01, fn.x));
-    if (sn > uWickThresh) transfer += max(sn - s.x, 0.0);
-    if (s.x > uWickThresh) transfer -= max(s.x - sn, 0.0);
+    if (sn > uWickThresh) transfer += wmod * max(sn - s.x, 0.0);
+    if (s.x > uWickThresh) transfer -= wmod * max(s.x - sn, 0.0);
   }
   s.x = clamp(s.x + uWick * uDt * transfer, 0.0, cap * 1.2);
 
@@ -399,13 +397,14 @@ void main() {
   // not invent it. (An additive term here made saturated paper a perpetual
   // water source, so a wash could never finish drying.)
   float thresh = uBackrun * cap;
-  if (s.x > thresh && f.w < 0.6 && wetNbr > 0.7) {
+  if (s.x > thresh && w < 0.6 && wetNbr > 0.7) {
     float release = min(uDt * 0.15 * (s.x - thresh) + 0.002, s.x * 0.5);
-    f.w = max(f.w, 0.75);
-    f.x += release;
+    w = max(w, 0.75);
+    h += release;
     s.x -= release;
   }
-  oFlow = f;
+
+  oFlow = vec4(h, f.yz, w);
   oSat = s;
 }`;
 
@@ -453,10 +452,15 @@ ${RP.map((i) => `  oSusp${i} = g${i};`).join('\n')}
 
 // ------------------------------------------------------------- transfer ----
 // Deposition / lifting between suspension and paper (Curtis et al. 1997 §4.5,
-// with rewetting on its own resolubility timescale). Split into two draws
-// (suspension update, deposit update) so no pass needs more than NP MRT
-// attachments — the WebGL2 guaranteed minimum is 4. Both read the same
-// pre-pass state and compute identical down/up amounts.
+// with rewetting on its own resolubility timescale).
+//
+// The natural shape is ONE pass writing 2*NP targets (every suspension and
+// every deposit texture), but the WebGL2 guaranteed MRT minimum is only 4 —
+// so there is a split form, two draws that read the same pre-pass state and
+// compute identical down/up amounts, for devices at the minimum. Hardware
+// that reports enough attachments (8 is typical, desktop and Apple GPUs
+// alike) gets the merged form: half the texture reads and half the draws of
+// what was, measured per-read, the most expensive stage in the pipeline.
 const TRANSFER_BODY = (outs) => `#version 300 es
 ${COMMON}
 uniform sampler2D uFlow;
@@ -469,7 +473,9 @@ uniform vec4 uGamma[${NP}];
 uniform vec4 uGrain[${NP}]; // granulation size: 0 fine tooth .. 1 coarse
 uniform float uSettle;
 uniform float uLift;
-${RP.map((i) => `layout(location=${i}) out vec4 o${i};`).join('\n')}
+${outs === 'both'
+    ? RP.map((i) => `layout(location=${i}) out vec4 oS${i};\nlayout(location=${NP + i}) out vec4 oD${i};`).join('\n')
+    : RP.map((i) => `layout(location=${i}) out vec4 o${i};`).join('\n')}
 
 void main() {
   vec4 f = texture(uFlow, vUV);
@@ -492,11 +498,14 @@ ${RP.map((i) => `  {
     vec4 up = d${i} * clamp((vec4(1.0) + (phE - 1.0) * uGamma[${i}]) / uOmega[${i}] * liftGate, 0.0, 1.0);
     down = min(down, max(vec4(1.0) - d${i}, 0.0));
     up = min(up, max(vec4(1.0) - g${i}, 0.0));
-    o${i} = ${outs === 'susp' ? `g${i} - down + up` : `d${i} + down - up`};
+${outs === 'both'
+      ? `    oS${i} = g${i} - down + up;\n    oD${i} = d${i} + down - up;`
+      : `    o${i} = ${outs === 'susp' ? `g${i} - down + up` : `d${i} + down - up`};`}
   }`).join('\n')}
 }`;
 SHADERS.transferSusp = TRANSFER_BODY('susp');
 SHADERS.transferDep = TRANSFER_BODY('dep');
+SHADERS.transferBoth = TRANSFER_BODY('both');
 
 // --------------------------------------------------------------- render ----
 SHADERS.render = `#version 300 es

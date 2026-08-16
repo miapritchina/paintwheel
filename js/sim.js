@@ -41,6 +41,11 @@ class WatercolorSim {
     if (maxAttach < PIG_TEXTURES + 1) {
       throw new Error(`This device supports only ${maxAttach} MRT attachments; ${PIG_TEXTURES + 1} needed.`);
     }
+    // Enough attachments to update every suspension AND deposit texture in
+    // one draw? Then the transfer stage runs merged: half the reads, half
+    // the draws. Devices at the WebGL2 minimum of 4 keep the split form.
+    this._maxAttach = Math.min(maxAttach, gl.getParameter(gl.MAX_DRAW_BUFFERS));
+    this.mergedTransfer = this._maxAttach >= 2 * PIG_TEXTURES;
 
     // Tunable physical parameters (see Curtis et al. 1997, Chu & Tai 2005).
     this.params = {
@@ -145,7 +150,11 @@ class WatercolorSim {
 
   _initPrograms() {
     this.progs = {};
-    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'probe', 'clear', 'copy']) {
+    const names = ['paper', 'splat', 'velocity', 'height', 'moisture', 'advect', 'render', 'salt', 'probe', 'clear', 'copy'];
+    // the merged transfer shader declares 2*PIG_TEXTURES outputs, which does
+    // not even compile on a device without the attachments for it
+    names.push(...(this.mergedTransfer ? ['transferBoth'] : ['transferSusp', 'transferDep']));
+    for (const name of names) {
       this.progs[name] = this._program(name, SHADERS[name]);
     }
   }
@@ -290,6 +299,7 @@ class WatercolorSim {
 
     PIG_TEXTURES = n;
     SHADERS = buildShaders(n);
+    this.mergedTransfer = this._maxAttach >= 2 * PIG_TEXTURES;
     for (const p of Object.values(this.progs)) gl.deleteProgram(p.prog);
     this._initPrograms();
 
@@ -333,9 +343,10 @@ class WatercolorSim {
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.probeTex, 0);
-    for (let i = 1; i < PIG_TEXTURES + 1; i++) {
+    for (let i = 1; i < Math.max(this._lastBound || 0, PIG_TEXTURES + 1); i++) {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, null, 0);
     }
+    this._lastBound = 1;
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     gl.viewport(0, 0, N, N);
     const p = this._use('probe', [['uFlow', this.flow.read], ['uSat', this.sat.read]]);
@@ -450,9 +461,13 @@ class WatercolorSim {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, textures[i], 0);
       bufs.push(gl.COLOR_ATTACHMENT0 + i);
     }
-    for (let i = textures.length; i < PIG_TEXTURES + 1; i++) {
+    // detach whatever the previous pass left above this one's outputs — the
+    // merged transfer binds up to 2*PIG_TEXTURES, and a stale attachment
+    // that a later pass samples would be a feedback loop
+    for (let i = textures.length; i < (this._lastBound || PIG_TEXTURES + 1); i++) {
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, null, 0);
     }
+    this._lastBound = textures.length;
     gl.drawBuffers(bufs);
     gl.viewport(0, 0, this.simW, this.simH);
   }
@@ -640,7 +655,8 @@ class WatercolorSim {
       this._draw();
       this.flow.swap();
 
-      // 3. moisture: evaporation + absorption
+      // 3. moisture: evaporation + absorption + capillary wicking/backruns
+      // (one merged pass — see the note on the moisture shader)
       this._bindOutputs([this.flow.write, this.sat.write]);
       p = this._use('moisture', [['uFlow', this.flow.read], ['uSat', this.sat.read], ['uPaper', this.paperTex]]);
       // Pulsed drying: nothing on most substeps, then the accumulated loss
@@ -654,13 +670,6 @@ class WatercolorSim {
       gl.uniform1f(p.uniforms.uRunAbsorb, P.runAbsorb);
       gl.uniform1f(p.uniforms.uSatEvap, P.satEvap * dry);
       gl.uniform1f(p.uniforms.uWetThresh, P.wetThresh);
-      this._draw();
-      this.flow.swap();
-      this.sat.swap();
-
-      // 4. capillary wicking / backruns
-      this._bindOutputs([this.flow.write, this.sat.write]);
-      p = this._use('capillary', [['uFlow', this.flow.read], ['uSat', this.sat.read], ['uPaper', this.paperTex]]);
       gl.uniform1f(p.uniforms.uWick, P.wick);
       gl.uniform1f(p.uniforms.uWickThresh, P.wickThresh);
       gl.uniform1f(p.uniforms.uBackrun, P.backrun);
@@ -676,10 +685,15 @@ class WatercolorSim {
       this._draw();
       this.susp.forEach((pr) => pr.swap());
 
-      // 6. deposition / lifting: two draws over the same pre-pass state
-      // (suspension update, then deposit update), swap everything after.
+      // 6. deposition / lifting. One draw writing every suspension and
+      // deposit texture where the hardware has the attachments for it;
+      // otherwise two draws over the same pre-pass state (suspension
+      // update, then deposit update). Swap everything after.
       this._ensurePigParams();
-      for (const [prog, targets] of [['transferSusp', this.susp], ['transferDep', this.dep]]) {
+      const passes = this.mergedTransfer
+        ? [['transferBoth', [...this.susp, ...this.dep]]]
+        : [['transferSusp', this.susp], ['transferDep', this.dep]];
+      for (const [prog, targets] of passes) {
         this._bindOutputs(targets.map((pr) => pr.write));
         p = this._use(prog, [
           ['uFlow', this.flow.read], ['uPaper', this.paperTex],

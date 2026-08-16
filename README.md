@@ -24,12 +24,22 @@ RGBA16F textures:
    pigment's measured **density**, **staining power** and **granulation**.
 3. **Capillary layer** — water absorbed into the sheet wicks between fibers;
    when it seeps back into a drying wash it re-wets it and produces
-   **backruns** ("cauliflowers").
+   **backruns** ("cauliflowers"). Wicking is deliberately *heterogeneous*:
+   paper is not a uniform sponge, it is a mat of fiber bundles, and Darcy
+   flow through it runs fast along a bundle and stalls between them. Each
+   cell-to-cell exchange is weighted by the fiber noise of both cells (the
+   pair average keeps the exchange symmetric, so heterogeneity cannot create
+   or destroy water) — which is why a damp fringe creeps outward ragged and
+   feathered rather than as a smooth blurred halo.
 4. **Kubelka-Munk rendering** — colors are not RGB-blended: every pixel
    composites the pigment mixture optically over textured paper using the
    measured K (absorption) / S (scattering) spectra from the Curtis paper.
    That's why ultramarine + hansa yellow makes green, glazes behave like
    glazes, and cadmiums cover while quinacridones stain transparently.
+   (No Saunderson surface-reflection correction on top, and deliberately:
+   each paint's K/S is inverted from its *observed* mass tone and undertone
+   colours, so the air/paint interface reflection is already baked into the
+   calibration — adding the correction would count it twice.)
 
 The paint box reproduces the artist's real paint wheel, pigment by
 pigment (Colour Index codes in parentheses): Cadmium Lemon (PY35), Irgazin
@@ -249,6 +259,22 @@ frame in the old build. Three changes:
   rather than painting. A 16×16 probe asks the GPU "is anything still wet?"
   a few times a second and reads back 1KB; on a dry sheet the app now
   simulates **0 frames out of 100**, and on a wet one 92 of 100.
+- **Fewer, fatter passes.** Every pass is memory-bound — its real cost is
+  writing and re-reading the full state textures — so two merges cut the
+  per-substep traffic directly. Moisture and capillary were two passes each
+  round-tripping flow+sat; they are one pass now (the capillary half sees
+  neighbours one substep stale, far below anything visible). And the
+  deposition/lifting stage, which reads flow, paper and *every* pigment
+  texture, used to run as two identical draws purely because the WebGL2
+  guaranteed MRT minimum is 4 attachments; on hardware that reports enough
+  attachments (8 is typical — desktop and Apple GPUs alike) it now updates
+  every suspension and deposit texture in a single draw: half the reads and
+  half the draws of the heaviest stage in the pipeline. Devices at the
+  minimum keep the split form. The render pass also stopped re-fetching
+  every deposit texture for the rim-gradient centre tap (the samples were
+  already in registers), and the velocity pass skips its Marangoni
+  pigment-gradient taps — five per pigment texture per cell — entirely when
+  run-off is off.
 
 ## Settings (⚙)
 
