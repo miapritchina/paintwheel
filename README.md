@@ -71,6 +71,19 @@ Beyond the papers, the model borrows two effects:
 - **Pinned contact line** — a wash boundary stays put while rim evaporation
   draws interior fluid (and pigment) outward: the coffee-ring effect that
   dries into dark edge lines.
+- **Wet things are darker** — two distinct optical mechanisms, both in the
+  render pass and neither of them a "darken by 11%" fudge (which is what
+  they replaced). *Wet paper* darkens because water fills the pores and
+  index-matches the cellulose fibers: light trapped by internal reflection
+  in the film makes extra passes through the absorbing sheet, so the wet
+  reflectance is a **power** of the dry one (Ångström's argument, quantified
+  by Lekner & Dorf 1988) — which also deepens colour, since dark channels
+  fall faster than light ones. *Wet pigment* is darker for the mirrored
+  reason: water index-matches the pigment particles, so Kubelka-Munk
+  scattering S collapses and the layer acts as a nearly pure absorber; as
+  the wash dries, air returns between the grains, S recovers, and the colour
+  lightens. That is "watercolor dries lighter" — the painter's constant
+  complaint — falling out of the optics instead of being painted on.
 
 ## The brush: two independent axes
 
@@ -409,3 +422,8 @@ python3 -m http.server 8000
   darkening trick adopted in the render pass
 - Corel patent US 9,240,063 — three-layer canvas & rewetting model that
   informed the dried-paint resolubility behavior
+- Lekner & Dorf, *Why some things are darker when wet*, Applied Optics 27(7)
+  1988 — internal reflection in the wetting film makes wet reflectance a
+  power of dry reflectance; the wet-paper darkening model
+- Jensen, Legakis & Dorsey, *Rendering of Wet Materials*, EG Workshop on
+  Rendering 1999 — wet-surface albedo reduction in practice

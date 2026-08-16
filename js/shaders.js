@@ -224,19 +224,25 @@ void main() {
   // Marangoni flow: paint lowers surface tension, so fluid is pulled from
   // painted regions toward clean water (log-concentration per the Gibbs
   // isotherm) — this drives wet-on-wet blooms. Fibers modulate -> feathering.
-  float fiber = 0.6 + 0.8 * texture(uPaper, vUV).z;
-  float pc = pigTotal(vUV);
-  vec2 gp = 0.5 * vec2(pigTotal(vUV + vec2(uTexel.x, 0.0)) - pigTotal(vUV - vec2(uTexel.x, 0.0)),
-                       pigTotal(vUV + vec2(0.0, uTexel.y)) - pigTotal(vUV - vec2(0.0, uTexel.y)));
-  // The gate used to open at h=0.02 and only reach full strength at 0.08 —
-  // but a brush dab lays down 0.01..0.05, so for ordinary painting this term
-  // was switched off and colour dropped into a wet wash hardly moved. It has
-  // to open where the water a brush actually leaves lives.
-  target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.003, 0.018, h);
+  // The whole block is skipped when the term is off (run-off disabled): the
+  // five pigTotal calls below are 5 texture reads PER PIGMENT TEXTURE per
+  // cell per substep, the most expensive thing in this pass.
+  float fiberNoise = texture(uPaper, vUV).z;
+  if (uMaran > 0.0) {
+    float fiber = 0.6 + 0.8 * fiberNoise;
+    float pc = pigTotal(vUV);
+    vec2 gp = 0.5 * vec2(pigTotal(vUV + vec2(uTexel.x, 0.0)) - pigTotal(vUV - vec2(uTexel.x, 0.0)),
+                         pigTotal(vUV + vec2(0.0, uTexel.y)) - pigTotal(vUV - vec2(0.0, uTexel.y)));
+    // The gate used to open at h=0.02 and only reach full strength at 0.08 —
+    // but a brush dab lays down 0.01..0.05, so for ordinary painting this term
+    // was switched off and colour dropped into a wet wash hardly moved. It has
+    // to open where the water a brush actually leaves lives.
+    target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.003, 0.018, h);
+  }
 
   // device tilt: only a genuinely wet film runs (drips), damp washes hold;
   // fiber modulation breaks the advancing front into fingers
-  target += uTilt * smoothstep(0.025, 0.1, h) * (0.7 + 0.6 * texture(uPaper, vUV).z);
+  target += uTilt * smoothstep(0.025, 0.1, h) * (0.7 + 0.6 * fiberNoise);
 
   vec2 vel = mix(target, f.yz, uInertia);
   vel *= w * smoothstep(0.0003, 0.004, h);
@@ -538,6 +544,12 @@ void main() {
   vec4 pap = texture(uPaper, vUV);
 ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);\n  vec4 d${i} = texture(uDep${i}, vUV);`).join('\n')}
 
+  // Total deposit at this pixel, taken from the samples above BEFORE the
+  // granulation reshaping below — the rim gradient's neighbour taps read the
+  // raw textures, so its centre tap must be raw too. (This used to be a
+  // second depTotal(vUV), re-fetching every deposit texture already in hand.)
+  float dC = ${RP.map((i) => `dot(d${i}, vec4(1.0))`).join(' + ')};
+
   // Granulating pigment piles into paper valleys; at render scale that reads
   // as optical thickness following the inverse of paper height. Each paint's
   // grain parameter picks fine tooth vs coarse structure.
@@ -574,6 +586,25 @@ ${RP.map((i) => `  {
   float lam = 0.88 + 0.12 * max(dot(n, lightDir), 0.0);
   vec3 Rpaper = uPaperColor * lam * (0.96 + 0.04 * pap.z);
 
+  // Wet paper darkens because water fills the pores and index-matches the
+  // fibers: less scattering, and light trapped by internal reflection in the
+  // film makes extra passes through the absorbing sheet (Ångström; Lekner &
+  // Dorf 1988). The multiple passes make the darkening a POWER of the dry
+  // reflectance — which also deepens colour, since dark channels fall faster
+  // than light ones — not a flat multiplier. Driven by fiber saturation
+  // (a damp sheet is dark long after the shine has gone) plus the free film.
+  float wetSub = clamp(clamp(s.x, 0.0, 1.0) * 0.85
+                       + smoothstep(0.0005, 0.02, f.x) * 0.5
+                       + f.w * 0.15, 0.0, 1.0);
+  Rpaper = pow(Rpaper, vec3(1.0 + 0.75 * wetSub));
+
+  // The pigment itself is darker while wet, for the mirrored reason: water
+  // index-matches the pigment particles, so scattering S collapses toward
+  // zero and the layer acts as a nearly pure absorber; as the wash dries the
+  // air returns between the grains, S recovers, and the colour lightens —
+  // "watercolor dries lighter", the painter's constant complaint, for free.
+  S *= mix(1.0, 0.55, wetSub);
+
   vec3 Rtot = Rpaper;
   if (total > 1e-5) {
     vec3 R, T;
@@ -585,15 +616,10 @@ ${RP.map((i) => `  {
   // classic watercolor rim), sampled at 2-texel radius so grain-scale
   // granulation doesn't read as edges.
   vec2 e2 = uTexel * 2.0;
-  float dC = depTotal(vUV);
   float rimGrad = length(vec2(depTotal(vUV + vec2(e2.x, 0.0)) - depTotal(vUV - vec2(e2.x, 0.0)),
                               depTotal(vUV + vec2(0.0, e2.y)) - depTotal(vUV - vec2(0.0, e2.y)))) * 0.5;
   float rim = clamp(rimGrad * 0.9, 0.0, 0.30) * smoothstep(0.02, 0.3, dC);
   Rtot *= 1.0 - rim;
-
-  // wet areas look darker & glossier
-  float wetvis = clamp(f.w * 0.35 + smoothstep(0.0, 0.04, f.x) * 0.55 + s.x * 0.08, 0.0, 1.0);
-  Rtot *= mix(1.0, 0.89, wetvis);
 
   // Metallic layer, over the top of the finished watercolor. Mica is a
   // scatter of flat flakes, so the sheen is not a smooth highlight but a
