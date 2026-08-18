@@ -329,6 +329,10 @@
 
   function rebuildPans() {
     paletteEl.innerHTML = '';
+    // as many columns as pans up to six, so a small palette fills the row
+    // with fat pans instead of leaving empty grid cells beside them
+    const cols = Math.max(1, Math.min(6, PANS.length));
+    paletteEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 84px))`;
     PANS.forEach((pan, i) => {
       const p = pan.paint;
       const wrap = document.createElement('div');
