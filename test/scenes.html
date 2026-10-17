@@ -1,0 +1,186 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Paintwheel — the scenes</title>
+<!--
+  The looking sheet. Where test/tells.html measures, this one paints the
+  marks a watercolourist actually makes — a flat wash, a graded wash, wet
+  into wet, a glaze, dry brush, a charged stroke, a backrun, a mixed wash, a
+  lift — through the real paint model and the real engine, and hands back
+  pictures to be judged by eye. Render it with tools/scenes.js.
+-->
+<style>
+  html, body { margin: 0; background: #23242a; }
+  #sheet { display: block; }
+</style>
+<canvas id="sheet"></canvas>
+
+<script src="../js/version.js"></script>
+<script src="../js/pigments.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/logbook.js"></script>
+<script src="../js/shaders.js"></script>
+<script src="../js/sim.js"></script>
+<script src="../js/brush.js"></script>
+<script>
+'use strict';
+
+const W = 1020, H = 700;
+const cv = document.getElementById('sheet');
+cv.style.width = W + 'px';
+cv.style.height = H + 'px';
+const sim = new WatercolorSim(cv, { paper: 'rough', maxSim: 520 });
+window.sim = sim;
+
+const PAINTS = {};
+function usePalette(names) {
+  setPalette(names.map((n) => PAINTBOX.findIndex((p) => p.short === n || p.name === n)));
+  sim.setChannelTextures(Math.max(1, Math.ceil(names.length / 4)));
+  names.forEach((n, i) => { PAINTS[n] = i; });
+}
+function loadBrush(paint, frac, water) {
+  BRUSH.pig.fill(0);
+  if (typeof paint === 'string') BRUSH.pig[PAINTS[paint]] = 1;
+  else for (const [k, v] of Object.entries(paint)) BRUSH.pig[PAINTS[k]] = v;
+  BRUSH.setFrac(frac);
+  BRUSH.water = water;
+}
+// a stroke as the app makes it: dabs at a fixed step, pressure optionally
+// varying along it, each dab charged for its travel
+function line(x0, y0, x1, y1, size, pressure = 0.6, wobble = 0) {
+  const step = Math.max(size * 0.3, 2);
+  const dist = Math.hypot(x1 - x0, y1 - y0);
+  const n = Math.max(1, Math.round(dist / step));
+  const pig = new Float32Array(N_CHANNELS);
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const p = typeof pressure === 'function' ? pressure(t) : pressure;
+    const advance = i === 0 ? step : dist / n;
+    BRUSH.dry(advance);
+    const r = size * (0.5 + p);
+    const d = BRUSH.dab(advance, r, p, pig, { flow: 1 });
+    const yy = y0 + (y1 - y0) * t + Math.sin(t * 9) * wobble;
+    sim.splat(x0 + (x1 - x0) * t, yy, r, d.water, d.amp, d.wetness, d.scrub);
+  }
+}
+function wetPatch(x, y, r, water = 0.9) {
+  const empty = new Float32Array(N_CHANNELS);
+  const step = Math.max(r * 0.3, 2);
+  for (let yy = y - r; yy <= y + r; yy += step) {
+    for (let xx = x - r; xx <= x + r; xx += step) {
+      if (Math.hypot(xx - x, yy - y) > r) continue;
+      sim.splat(xx, yy, r * 0.55, 0.055 * water, empty, water, 0);
+    }
+  }
+}
+function run(steps) { for (let i = 0; i < steps; i++) sim.step(); }
+function dryOut(maxSteps = 900) {
+  const was = sim.params.drySpeed;
+  sim.params.drySpeed = 120;
+  for (let i = 0; i < maxSteps; i += 15) {
+    for (let k = 0; k < 15; k++) sim.step();
+    if (!sim.anythingWet()) break;
+  }
+  sim.params.drySpeed = was;
+}
+const stages = [];
+function snap(label) { sim.render(); stages.push({ label, png: cv.toDataURL('image/png') }); }
+
+// panel origins: 3 x 3, each 340 x 233
+const P = (c, r) => ({ x: c * 340 + 24, y: r * 233 + 30, w: 292, h: 180 });
+
+async function paint() {
+  usePalette(['Ultram.', 'Lemon', 'Pyrrole', 'Gran. Bk']);
+  sim.clearAll();
+
+  // 1. flat wash — overlapping strokes of a juicy mid-strength load
+  { const p = P(0, 0);
+    for (let k = 0; k < 6; k++) {
+      loadBrush('Ultram.', 0.42, 0.85);
+      line(p.x, p.y + 16 + k * 26, p.x + p.w, p.y + 16 + k * 26, 20);
+    } }
+  // 2. graded wash — each row paler than the last
+  { const p = P(1, 0);
+    for (let k = 0; k < 6; k++) {
+      loadBrush('Pyrrole', 0.55 * Math.pow(0.55, k), 0.85);
+      line(p.x, p.y + 16 + k * 26, p.x + p.w, p.y + 16 + k * 26, 20);
+    } }
+  // 3. wet into wet — a clear puddle, yellow and blue dropped in
+  { const p = P(2, 0);
+    wetPatch(p.x + p.w / 2, p.y + p.h / 2, 92, 0.95);
+    run(30);
+    loadBrush('Lemon', 0.8, 0.75);
+    line(p.x + 70, p.y + 60, p.x + 200, p.y + 50, 12);
+    loadBrush('Ultram.', 0.7, 0.75);
+    line(p.x + 110, p.y + 130, p.x + 240, p.y + 120, 12);
+    run(120);
+    snap('wet into wet, still wet');
+  }
+  run(400);
+  dryOut();
+  // 4. glaze — a dried yellow wash, a blue stroke across it
+  { const p = P(0, 1);
+    for (let k = 0; k < 4; k++) {
+      loadBrush('Lemon', 0.5, 0.8);
+      line(p.x + 30, p.y + 30 + k * 28, p.x + p.w - 30, p.y + 30 + k * 28, 20);
+    }
+    dryOut();
+    loadBrush('Ultram.', 0.35, 0.7);
+    line(p.x + p.w / 2 - 10, p.y, p.x + p.w / 2 + 10, p.y + p.h, 22);
+  }
+  // 5. dry brush — a thirsty brush dragged over the tooth
+  { const p = P(1, 1);
+    loadBrush('Gran. Bk', 0.7, 0.12);
+    line(p.x, p.y + 60, p.x + p.w, p.y + 70, 18, 0.35, 6);
+    loadBrush('Pyrrole', 0.7, 0.16);
+    line(p.x, p.y + 125, p.x + p.w, p.y + 115, 18, 0.45, 6);
+  }
+  // 6. a charged stroke — one load, pressure swelling and easing
+  { const p = P(2, 1);
+    loadBrush('Pyrrole', 0.9, 0.7);
+    line(p.x, p.y + 40, p.x + p.w, p.y + 60, 14, (t) => 0.25 + 0.65 * Math.sin(t * Math.PI), 14);
+    loadBrush('Ultram.', 0.9, 0.5);
+    line(p.x, p.y + 130, p.x + p.w, p.y + 120, 10, (t) => 0.9 - 0.7 * t, 10);
+  }
+  dryOut();
+  // 7. backrun — water into a wash that has lost its shine
+  { const p = P(0, 2);
+    for (let k = 0; k < 4; k++) {
+      loadBrush('Ultram.', 0.45, 0.9);
+      line(p.x + 20, p.y + 40 + k * 26, p.x + p.w - 20, p.y + 40 + k * 26, 20);
+    }
+    run(1600);
+    const empty = new Float32Array(N_CHANNELS);
+    sim.splat(p.x + p.w / 2, p.y + 80, 34, 0.095, empty, 1.0, 0);
+    sim.rewet();
+    run(300);
+    snap('backrun opening');
+    run(600);
+  }
+  // 8. a mixed wash — seven lemon, one black, two ultramarine: a green
+  { const p = P(1, 2);
+    for (let k = 0; k < 5; k++) {
+      loadBrush({ 'Lemon': 7, 'Gran. Bk': 1, 'Ultram.': 2 }, 0.5, 0.85);
+      line(p.x + 10, p.y + 30 + k * 28, p.x + p.w - 10, p.y + 30 + k * 28, 20);
+    }
+  }
+  dryOut();
+  // 9. lifting — a clean damp brush scrubbed through a dried wash
+  { const p = P(2, 2);
+    for (let k = 0; k < 4; k++) {
+      loadBrush('Ultram.', 0.45, 0.85);
+      line(p.x + 10, p.y + 30 + k * 28, p.x + p.w - 10, p.y + 30 + k * 28, 20);
+    }
+    dryOut();
+    for (let pass = 0; pass < 6; pass++) {
+      loadBrush('Ultram.', 0, 0.7);
+      line(p.x + p.w / 2 - 12, p.y + 10, p.x + p.w / 2 + 12, p.y + p.h - 10, 16, 0.8);
+      run(20);
+    }
+  }
+  dryOut();
+  snap('dry');
+  return stages;
+}
+window.__scenes = paint;
+window.__ready = true;
+</script>
