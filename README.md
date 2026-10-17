@@ -2,7 +2,32 @@
 
 A physically-based, real-time wet watercolor simulator that runs in the browser
 (WebGL2, works on iPhone/iPad Safari). Open `index.html` from any static
-server and paint with mouse, finger, or Apple Pencil (pressure supported).
+server and paint with mouse, finger, or Apple Pencil (pressure and tilt
+supported).
+
+## Hands and pencil
+
+The input contract is the one Procreate, Fresco and ArtSet share, because it
+is what an iPad hand already knows:
+
+- **The Pencil paints.** Pressure sets the width and how fast paint leaves
+  the brush; tilt stretches the footprint along the barrel.
+- **Fingers navigate.** Pinch to zoom, drag to pan, tap with two fingers to
+  undo. Pinch the sheet smaller than the screen and it snaps back to fit;
+  ⤢ in the bar does the same.
+- **Until a Pencil has touched the sheet, one finger paints too**, and a
+  second finger turns that touch into navigation — taking back the mark it
+  had started if it had barely begun. *Finger paints* in Settings makes this
+  always or never.
+- **Lifting the pen dips the brush again.** Within a stroke the hairs run
+  out and the line fades to dry-brush; between strokes the load comes back.
+
+The paper is a **sheet** with its own size, decided when it is made, and the
+screen is a view onto it. Turning the device, Split View, Safari showing its
+toolbar: none of it touches the painting any more. It used to — the grid was
+sized from the canvas, so a rotation reallocated every texture and wiped the
+sheet. Brush size is a size on the paper, so zoomed in, the same Size paints
+a finer line on screen.
 
 Supports **wet-on-wet** (blooms, feathering, backruns) and **wet-on-dry**
 (crisp edges, edge darkening, dry-brush texture).
@@ -111,6 +136,27 @@ in Settings, and then the hairs hold their load: every line comes out the
 same however many you draw. It is the opposite of how a real brush behaves,
 which is exactly why it is a choice rather than the default.
 
+**Lifting the pen refills it.** Whatever the hairs carried at the start of a
+stroke, they carry again at the start of the next. This was documented and
+never done: after one wash the artist held an empty, dry brush and had to
+rebuild it from two sliders and a pan before the next mark. Every other
+painting app dips the brush between strokes; now so does this one.
+
+**Pressure drives flow** as well as width. Pressing harder lets paint leave
+the brush faster — a touch at about half the rate, leaning on it at nearly
+one and a half times — so a firm pass is darker and a light one a tint. The
+brush still pays for every bit it lays: this scales the *rate* of release,
+not the mass, so nothing about "pigment mass per area decides value" is
+bent. A finger or a mouse reports a fixed pressure and paints exactly as
+before. Off in Settings, pressure changes only the width.
+
+**Tilt shapes the footprint.** An upright Pencil lays a round dab; a leaning
+one lays its hairs along the paper, and the dab stretches in the direction
+of the barrel, up to nearly three times as long. The mass is divided by the
+stretch so a leaning stroke is the same depth as an upright one, only wider.
+It is the cheap version of Expresii's 3D brush, and the difference between
+a mark and a dot.
+
 ## The workbench
 
 The UI mirrors a physical setup: a **paint box of 12 pans**, a **water
@@ -120,12 +166,19 @@ glass** and a **sponge**. The brush is stateful — it carries water and a
 - **Dip a pan** to pick up paint (a wet brush dissolves the pan and picks up
   far more than a dry one, which only scuffs colour off it).
 - **Mix by parts.** A pan is a dial for its own share of the recipe:
-  **tap** adds a part, **drag up or down** sets it live, **long press**
-  takes it out. Yellow to 7, black to 1, blue to 2 and the brush carries
-  7:1:2. Dragging matters more than tapping —
+  **tap** adds a part, **drag up or down** sets it live (down to zero takes
+  it out), **hold** makes it the only colour. Yellow to 7, black to 1, blue
+  to 2 and the brush carries 7:1:2. Dragging matters more than tapping —
   a proportion is something you feel your way to, and tapping seven times
   to correct one part is not that. The Paint slider then says *how much*
   of that mixture is on the hairs, so ratio and quantity stay separate.
+
+  The hold used to remove a colour, which a drag to zero does as well. It
+  now does the one thing nothing else could: **switch**. Tapping adds parts,
+  which is right for mixing and wrong for changing colour — tap red, tap
+  blue and you were painting purple, and the only way to just have blue was
+  a rinse and a tap. A double tap was tried for this and collided with
+  tapping quickly to add parts.
 
   Above the pans, the mix is shown as **a dried stroke on the current
   paper** — not a chip of flat colour, which cannot show the two things that
@@ -163,13 +216,26 @@ glass** and a **sponge**. The brush is stateful — it carries water and a
 - **Paper picker**: Rough (the default) / Cold press / Hot press / Toned
   cream — different tooth, absorbency and tint (switching gives a fresh
   sheet).
-- **↶ Undo** steps back through the last strokes, drops, saltings and
-  clears. The painting is the state of a fluid simulation rather than a list
-  of shapes, so undo works by snapshotting that whole state — water,
-  suspended pigment and deposits alike — before anything that marks the
-  sheet. Undoing into a half-dry wash therefore brings back the wetness too,
-  not just the colour. Snapshots are large, so the depth is whatever fits a
-  memory budget: two or three on a phone, one on a big canvas.
+- **↶ Undo** (or a two-finger tap, or ⌘Z) steps back through strokes,
+  saltings and clears. The painting is the state of a fluid simulation
+  rather than a list of shapes, so undo has to restore that state — water,
+  suspended pigment and deposits alike — and undoing into a half-dry wash
+  brings back the wetness too, not just the colour.
+
+  It used to copy every texture into a GPU slot per stroke, tens of
+  megabytes each, which bought two or three steps on a phone and one on a
+  big canvas; a mistake into a wash was unrecoverable, so people painted
+  timidly. Now a step stores only the **region a stroke changed**, on the
+  CPU. Before a stroke the whole state is copied into a GPU "pre" buffer,
+  which is cheap; as the stroke ends, the texels it touched plus everything
+  wet are read back from that copy while nobody is waiting on the pen; and
+  at the next pen-down the sheet is compared with "pre" on the GPU, block by
+  block, so that whatever flowed or dried in between is covered too. A
+  stroke on a dry sheet is a few hundred kilobytes, a wash over the whole
+  sheet is the whole sheet, and the depth is whatever fits the budget —
+  dozens of ordinary strokes rather than two. Replaying the stroke log was
+  the other way to do this and was rejected: the sheet is time-dependent,
+  so replaying five minutes of painting means five minutes of simulation.
 
 ## Timing tools
 
@@ -236,6 +302,13 @@ frame in the old build. Three changes:
   rather than painting. A 16×16 probe asks the GPU "is anything still wet?"
   a few times a second and reads back 1KB; on a dry sheet the app now
   simulates **0 frames out of 100**, and on a wet one 92 of 100.
+- **A dab touches only its footprint.** Every dab used to be a full-grid
+  pass over four render targets. A fine brush spaces its dabs two pixels
+  apart, so a quick line fired hundreds of full-screen passes a second —
+  the lag and the heat on small brushes. The pass is now scissored to the
+  dab, and instead of ping-ponging the whole texture the region is copied
+  back, so a 4px brush costs a few hundred texels per dab rather than four
+  hundred thousand.
 
 ## Settings (⚙)
 
@@ -257,6 +330,12 @@ frame in the old build. Three changes:
 - **Pencil pressure → brush size** — Apple Pencil force drives stroke width
   (a light touch goes genuinely fine, a hard press spreads the whole belly
   of the brush). Off: the Size slider alone decides.
+- **Pencil pressure → paint flow** — pressing harder lets paint leave the
+  brush faster. Off: pressure changes only the width.
+- **Pencil tilt shapes the brush** — a leaning Pencil stretches the dab
+  along the barrel. Off: always round.
+- **Finger paints** — until a Pencil is used (default), always, or never.
+  Fingers pinch, pan and two-finger-tap-to-undo in every case.
 
 ## Paint box & channels
 
@@ -336,7 +415,7 @@ way to report "this didn't behave like real watercolor".
 ## Brush & workflow (inspired by Adobe Fresco / Art Set 4)
 
 - **Depleting reservoirs**: the brush carries finite water and pigment;
-  strokes fade and end in dry-brush tails. Dip again by lifting the stylus.
+  strokes fade and end in dry-brush tails. Lifting the stylus dips it again.
 - **Mixing well** (dashed swatch): tap it, then tap pigments to add parts —
   the well shows the Kubelka-Munk color of the mixture; tap the well again to
   paint with it (double-tap empties it). A mix is carried as real proportions
@@ -371,8 +450,10 @@ way to report "this didn't behave like real watercolor".
 - `js/shaders.js` — all simulation passes (GLSL ES 3.00)
 - `js/sim.js` — WebGL2 engine (ping-pong textures, MRT passes)
 - `js/pigments.js` — measured pigment data (Curtis et al. 1997, Fig. 5)
-- `js/main.js` — UI, pointer/stylus input
+- `js/main.js` — UI, pointer/stylus input, finger navigation
 - `js/demo.js` — scripted showcase (blooms, strokes, granulation, backrun)
+- `tools/tells.js` + `test/tells.html` — the paint model's regression sheet
+- `tools/input.js` — the input contract, checked headlessly against the app
 
 ## PWA & persistence
 

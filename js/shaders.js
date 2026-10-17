@@ -127,6 +127,8 @@ ${RP.map((i) => `uniform vec4 uPig${i};`).join('\n')}
 uniform float uWetness;
 uniform float uPush;
 uniform float uScrub;
+uniform vec2 uAxis;     // direction a tilted pen is pointing (uv space)
+uniform float uElong;   // how many times longer the footprint is along it
 layout(location=0) out vec4 oFlow;
 ${RP.map((i) => `layout(location=${i + 1}) out vec4 oSusp${i};`).join('\n')}
 
@@ -136,6 +138,9 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);`).join('\n')}
   vec4 pap = texture(uPaper, vUV);
 
   vec2 d = (vUV - uCenter) * uAspect;
+  // A pen held at an angle lays its hairs along the paper: the footprint is
+  // an ellipse stretched along the azimuth, not a disc. Round when upright.
+  d = vec2(dot(d, uAxis) / uElong, dot(d, vec2(-uAxis.y, uAxis.x)));
   float r = length(d) / max(uRadius, 1e-5);
   float m = 1.0 - smoothstep(0.3, 1.0, r);
 
@@ -508,6 +513,9 @@ uniform vec3 uPaperColor;
 uniform vec4 uMetal[${NP}];        // per-channel: 0 watercolor, 1 metallic
 uniform vec3 uMetalCol[${NP * 4}]; // each metal's own reflectance colour
 uniform float uWetView; // 1 = overlay wet/satin/damp stages
+// The screen is a view onto the sheet: xy scales screen uv to sheet uv, zw
+// is the sheet uv under the centre of the screen.
+uniform vec4 uView;
 out vec4 frag;
 
 float mhash(vec2 p) {
@@ -533,10 +541,18 @@ float depTotal(vec2 uv) {
 }
 
 void main() {
-  vec4 f = texture(uFlow, vUV);
-  vec4 s = texture(uSat, vUV);
-  vec4 pap = texture(uPaper, vUV);
-${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);\n  vec4 d${i} = texture(uDep${i}, vUV);`).join('\n')}
+  vec2 uv = (vUV - 0.5) * uView.xy + uView.zw;
+  // off the sheet: the desk, with the paper's shadow on it
+  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
+    float outside = max(max(-uv.x, uv.x - 1.0), max(-uv.y, uv.y - 1.0));
+    float shade = 1.0 - 0.35 * (1.0 - smoothstep(0.0, 0.035, outside));
+    frag = vec4(vec3(0.17, 0.16, 0.15) * shade, 1.0);
+    return;
+  }
+  vec4 f = texture(uFlow, uv);
+  vec4 s = texture(uSat, uv);
+  vec4 pap = texture(uPaper, uv);
+${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, uv);\n  vec4 d${i} = texture(uDep${i}, uv);`).join('\n')}
 
   // Granulating pigment piles into paper valleys; at render scale that reads
   // as optical thickness following the inverse of paper height. Each paint's
@@ -567,8 +583,8 @@ ${RP.map((i) => `  {
 
   // paper: warm white, shaded by grain relief
   vec2 e = uTexel;
-  float hx = texture(uPaper, vUV + vec2(e.x, 0.0)).x - texture(uPaper, vUV - vec2(e.x, 0.0)).x;
-  float hy = texture(uPaper, vUV + vec2(0.0, e.y)).x - texture(uPaper, vUV - vec2(0.0, e.y)).x;
+  float hx = texture(uPaper, uv + vec2(e.x, 0.0)).x - texture(uPaper, uv - vec2(e.x, 0.0)).x;
+  float hy = texture(uPaper, uv + vec2(0.0, e.y)).x - texture(uPaper, uv - vec2(0.0, e.y)).x;
   vec3 n = normalize(vec3(-hx * 2.2, -hy * 2.2, 1.0));
   vec3 lightDir = normalize(vec3(0.45, 0.55, 0.8));
   float lam = 0.88 + 0.12 * max(dot(n, lightDir), 0.0);
@@ -585,9 +601,9 @@ ${RP.map((i) => `  {
   // classic watercolor rim), sampled at 2-texel radius so grain-scale
   // granulation doesn't read as edges.
   vec2 e2 = uTexel * 2.0;
-  float dC = depTotal(vUV);
-  float rimGrad = length(vec2(depTotal(vUV + vec2(e2.x, 0.0)) - depTotal(vUV - vec2(e2.x, 0.0)),
-                              depTotal(vUV + vec2(0.0, e2.y)) - depTotal(vUV - vec2(0.0, e2.y)))) * 0.5;
+  float dC = depTotal(uv);
+  float rimGrad = length(vec2(depTotal(uv + vec2(e2.x, 0.0)) - depTotal(uv - vec2(e2.x, 0.0)),
+                              depTotal(uv + vec2(0.0, e2.y)) - depTotal(uv - vec2(0.0, e2.y)))) * 0.5;
   float rim = clamp(rimGrad * 0.9, 0.0, 0.30) * smoothstep(0.02, 0.3, dC);
   Rtot *= 1.0 - rim;
 
@@ -602,7 +618,7 @@ ${RP.map((i) => `  {
   if (metalAmt > 1e-4) {
     vec3 mc = metalCol / metalAmt;
     float cover = 1.0 - exp(-metalAmt * 5.0);
-    vec2 fp = vUV / uTexel;
+    vec2 fp = uv / uTexel;
     float flake = mhash(floor(fp * 1.7));
     float glint = pow(flake, 5.0) * (0.6 + 0.4 * max(dot(n, lightDir), 0.0));
     // flakes settle into the tooth like any heavy pigment, so the paper
@@ -611,8 +627,8 @@ ${RP.map((i) => `  {
     Rtot = mix(Rtot, metalRGB, cover);
   }
 
-  float wx = texture(uFlow, vUV + vec2(e.x, 0.0)).x - texture(uFlow, vUV - vec2(e.x, 0.0)).x;
-  float wy = texture(uFlow, vUV + vec2(0.0, e.y)).x - texture(uFlow, vUV - vec2(0.0, e.y)).x;
+  float wx = texture(uFlow, uv + vec2(e.x, 0.0)).x - texture(uFlow, uv - vec2(e.x, 0.0)).x;
+  float wy = texture(uFlow, uv + vec2(0.0, e.y)).x - texture(uFlow, uv - vec2(0.0, e.y)).x;
   vec3 wn = normalize(vec3(-wx * 30.0, -wy * 30.0, 1.0));
   float spec = pow(max(dot(wn, normalize(lightDir + vec3(0.0, 0.0, 1.0))), 0.0), 60.0);
   Rtot += spec * 0.06 * smoothstep(0.002, 0.03, f.x);
@@ -720,6 +736,41 @@ void main() {
     }
   }
   frag = vec4(clamp(wet, 0.0, 1.0));
+}`;
+
+// ----------------------------------------------------------------- diff ----
+// Undo bookkeeping: for each 64x64 block of the grid, has anything in the
+// sheet's water, saturation or deposits changed since the "pre" copy? Every
+// texel of the block is compared (texelFetch, so exactly), because a single
+// changed texel left behind after an undo is a visible speck.
+SHADERS.diff = `#version 300 es
+${COMMON}
+uniform sampler2D uFlow;
+uniform sampler2D uSat;
+${RP.map((i) => `uniform sampler2D uDep${i};`).join('\n')}
+uniform sampler2D uPreFlow;
+uniform sampler2D uPreSat;
+${RP.map((i) => `uniform sampler2D uPreDep${i};`).join('\n')}
+uniform vec2 uBlock;
+out vec4 frag;
+
+void main() {
+  vec2 base = floor(vUV / uBlock) * uBlock;
+  ivec2 size = textureSize(uFlow, 0);
+  ivec2 p0 = ivec2(floor(base / uTexel));
+  ivec2 p1 = min(ivec2(ceil((base + uBlock) / uTexel)), size);
+  float changed = 0.0;
+  for (int y = p0.y; y < p1.y; y++) {
+    for (int x = p0.x; x < p1.x; x++) {
+      ivec2 q = ivec2(x, y);
+      changed += dot(abs(texelFetch(uFlow, q, 0) - texelFetch(uPreFlow, q, 0)), vec4(1.0));
+      changed += dot(abs(texelFetch(uSat, q, 0) - texelFetch(uPreSat, q, 0)), vec4(1.0));
+${RP.map((i) => `      changed += dot(abs(texelFetch(uDep${i}, q, 0) - texelFetch(uPreDep${i}, q, 0)), vec4(1.0));`).join('\n')}
+      if (changed > 0.0) break;
+    }
+    if (changed > 0.0) break;
+  }
+  frag = vec4(changed > 0.0 ? 1.0 : 0.0);
 }`;
 
 // ---------------------------------------------------------------- clear ----

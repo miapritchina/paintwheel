@@ -34,23 +34,26 @@ const LOGBOOK = (() => {
       events.push({ f: frame, t: type, ...data });
     },
 
-    splat(target, x, y, r, water, pig, wet, scrub) {
+    splat(target, x, y, r, water, pig, wet, scrub, shape) {
       if (muted) return;
-      events.push({
+      const e = {
         f: frame, t: 'splat', on: target,
         x: round(x), y: round(y), r: round(r),
         w: round(water, 10000), pig: pigObj(pig),
         wet: round(wet, 1000), scrub: round(scrub || 0, 1000),
-      });
+      };
+      // a tilted pen's footprint: [angle, elongation]
+      if (shape && shape.elong > 1) e.sh = [round(shape.angle, 1000), round(shape.elong, 1000)];
+      events.push(e);
     },
 
     // Wrap a sim so every splat is recorded (demo strokes included).
     attach(sim, target) {
       const orig = sim.splat.bind(sim);
       sim.__rawSplat = orig;
-      sim.splat = (x, y, r, water, pig, wet, scrub) => {
-        api.splat(target, x, y, r, water, pig, wet, scrub);
-        orig(x, y, r, water, pig, wet, scrub);
+      sim.splat = (x, y, r, water, pig, wet, scrub, shape) => {
+        api.splat(target, x, y, r, water, pig, wet, scrub, shape);
+        orig(x, y, r, water, pig, wet, scrub, shape);
       };
     },
 
@@ -62,6 +65,7 @@ const LOGBOOK = (() => {
         recordedAt: new Date(t0).toISOString(),
         durationFrames: frame,
         viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 },
+        sheet: window.sim ? { w: sim.sheetW, h: sim.sheetH } : null,
         channels: CHANNELS.map((p) => (p ? `${p.name} (${p.ci})` : null)),
         pans: PANS.map((p) => p.paint.name),
         ...extra,
@@ -105,6 +109,7 @@ const REPLAY = (() => {
       idx = 0;
       f = 0;
       LOGBOOK.muted = true;
+      if (s.sheet && window.sim) sim.newSheet(s.sheet.w, s.sheet.h);
       if (s.paper && window.sim) sim.setPaper(s.paper);
       if (window.sim) sim.clearAll();
       return s;
@@ -124,7 +129,8 @@ const REPLAY = (() => {
         if (e.t === 'splat' && target) {
           const pig = new Float32Array(N_CHANNELS);
           for (const [k, v] of Object.entries(e.pig || {})) pig[+k] = v;
-          (target.__rawSplat || target.splat)(e.x, e.y, e.r, e.w, pig, e.wet, e.scrub || 0);
+          const shape = e.sh ? { angle: e.sh[0], elong: e.sh[1] } : null;
+          (target.__rawSplat || target.splat)(e.x, e.y, e.r, e.w, pig, e.wet, e.scrub || 0, shape);
         } else if (e.t === 'clear' && window.sim) sim.clearAll();
         else if (e.t === 'palette') {
           assignPan(e.slot, e.id);

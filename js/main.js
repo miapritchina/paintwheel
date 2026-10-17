@@ -1,9 +1,9 @@
 // UI wiring: painter's workbench.
 //
 // The brush is a stateful object carrying water + a 12-pigment load. Two
-// sliders set those two quantities and a tap on a pan sets the recipe;
-// nothing refills by itself, so a stroke that runs long goes dry-brush,
-// exactly like the real thing.
+// sliders set those two quantities and a tap on a pan sets the recipe. A
+// stroke that runs long goes dry-brush, exactly like the real thing, and
+// lifting the pen dips the brush again.
 //
 // Colours are mixed by PARTS on the pans rather than smeared together on a
 // simulated plate: tap yellow seven times, black once, blue twice and the
@@ -263,10 +263,17 @@
 
   // A pan is a dial for its own share of the recipe:
   //   tap             +1 part
-  //   drag up/down    raise / lower that share, live
-  //   long press      take it out of the mix
+  //   drag up/down    raise / lower that share, live (down to zero removes it)
+  //   hold            this colour alone
   // Dragging is the important one — a proportion is something you feel your
   // way to, and tapping seven times to correct one part is not that.
+  //
+  // The hold used to take a colour OUT of the mix, which a drag to zero does
+  // as well. It now does the one thing nothing else could: switch. Tapping
+  // adds parts, which is right for mixing and wrong for changing colour —
+  // tap red, tap blue and you were painting purple, and the only way to just
+  // have blue was a rinse and a tap. A double tap was tried for this and
+  // collided with tapping quickly to add parts.
   const PART_PX = 14;   // pixels of drag per part (20 parts in one screen-height drag)
   const PART_MAX = 20;
 
@@ -289,8 +296,9 @@
       held = setTimeout(() => {
         if (changed) return;
         changed = true; held = null; // a long press consumes the tap
-        PARTS[i] = 0;
-        commit('hold');
+        for (let k = 0; k < NPIG; k++) if (k !== i) PARTS[k] = 0;
+        PARTS[i] = Math.max(1, PARTS[i]);
+        commit('solo');
       }, 600);
     });
 
@@ -336,7 +344,7 @@
       const b = document.createElement('button');
       b.className = 'pan';
       b.style.background = p.swatch;
-      b.title = `${p.name} (${p.ci}) — tap to add a part, drag up/down to set it, hold to remove`;
+      b.title = `${p.name} (${p.ci}) — tap to add a part, drag up/down to set it (to zero removes it), hold for this colour alone`;
       const badge = document.createElement('div');
       badge.className = 'panparts';
       const label = document.createElement('div');
@@ -390,6 +398,9 @@
     deplete: true,     // the brush runs out as you paint
     tiltStrength: 1.0, // how steeply tilt runs the paint
     pressRange: 0.6,   // how far stylus force moves the brush size
+    pressFlow: true,   // stylus pressure drives how fast paint leaves the brush
+    tiltShape: true,   // stylus tilt stretches the footprint along the pen
+    fingerPaints: 'auto', // auto: fingers paint until a Pencil is seen; on; off
   };
   window.SET = SET;
 
@@ -475,6 +486,9 @@
   const depleteEl = document.getElementById('deplete');
   const tiltStrEl = document.getElementById('tiltstrength');
   const pressRangeEl = document.getElementById('pressrange');
+  const pressFlowEl = document.getElementById('pressflow');
+  const tiltShapeEl = document.getElementById('tiltshape');
+  const fingerEl = document.getElementById('fingerpaints');
   const qualityEl = document.getElementById('quality');
 
   // The two knobs that actually cost power, measured on an iPad in
@@ -510,6 +524,9 @@
     // so the top of the dial was the answer rather than a limit.
     SET.tiltStrength = (Number(tiltStrEl.value) / 100) * 4;
     SET.pressRange = Number(pressRangeEl.value) / 100;
+    SET.pressFlow = pressFlowEl.checked;
+    SET.tiltShape = tiltShapeEl.checked;
+    SET.fingerPaints = fingerEl.value;
     const q = QUALITY[qualityEl.value] || QUALITY.balanced;
     sim.setQuality(q.maxSim, q.dpr);
     sim.params.saltGrain = SET.saltGrain;
@@ -518,7 +535,7 @@
     sim.setFlow(SET.runoff);
     if (log) LOGBOOK.log('settings', { ...SET });
   }
-  for (const el of [pickupEl, saltsizeEl, runoffEl, pressEl, depleteEl, tiltStrEl, pressRangeEl, qualityEl]) {
+  for (const el of [pickupEl, saltsizeEl, runoffEl, pressEl, depleteEl, tiltStrEl, pressRangeEl, pressFlowEl, tiltShapeEl, fingerEl, qualityEl]) {
     el.addEventListener('input', () => applySettings());
   }
   dryingEl.addEventListener('input', () => applyDrying());
@@ -531,6 +548,7 @@
     snapshot(); // clearing the sheet is undoable too
     LOGBOOK.log('clear');
     sim.clearAll();
+    sim.commitUndo();
   });
   const dryBtn = document.getElementById('dry');
   dryBtn.addEventListener('pointerdown', () => { sim.params.drySpeed = 30; LOGBOOK.log('drySpeed', { v: 30 }); });
@@ -682,7 +700,7 @@
   // number of colours, which can only shrink when there is nothing to lose.
   document.getElementById('newpainting').addEventListener('click', () => {
     if (!window.confirm('Start a new painting? The current sheet is cleared.')) return;
-    sim.clearAll();
+    sim.newSheet(); // a fresh sheet, sized to the screen as it is held now
     sim.clearUndo();
     PARTS.fill(0);
     brush.pig.fill(0);
@@ -851,9 +869,15 @@
     if (sim.undo()) {
       LOGBOOK.log('undo');
       updateBrushView(`Undone — ${sim.undoCount} step${sim.undoCount === 1 ? '' : 's'} left`);
+      updateCursor();
     } else {
       updateBrushView('Nothing left to undo');
     }
+  });
+
+  document.getElementById('fitview').addEventListener('click', () => {
+    sim.fitView();
+    updateBrushView('Whole sheet');
   });
 
   const wetviewBtn = document.getElementById('wetview');
@@ -882,11 +906,32 @@
   });
 
   // ----------------------------------------------------- painting: paper ---
+  // The input contract, which is what Procreate, Fresco and ArtSet all share
+  // and this app did not: the Pencil paints; fingers pinch to zoom and drag
+  // to pan; a two-finger tap undoes; a hand resting on the glass while the
+  // pen is down is a palm and does nothing. Until a Pencil has been seen (or when
+  // the setting says so) a single finger paints too, and a second finger
+  // turns that touch into navigation — taking back the mark it had started
+  // if it had barely begun, the way Procreate does.
+  //
+  // Everything the brush does is in SHEET coordinates (see sim.resize): the
+  // screen is a view onto the paper, so a stroke lands where the pen is
+  // whatever the zoom, and the brush size is a size on the paper.
   const pigDep = new Float32Array(NPIG);
-  let painting = false;
-  let last = null;
-  let salting = false;
-  let saltLast = null;
+  let last = null;      // previous dab, sheet px
+  let stroke = null;    // the stroke in progress
+  let salting = null;   // the salt gesture in progress
+  let gesture = null;   // finger navigation in progress
+  let penSeen = false;
+  const pointers = new Map(); // pointerId -> { type, x, y } in screen css px
+
+  function fingersPaint() {
+    if (SET.fingerPaints === 'on') return true;
+    if (SET.fingerPaints === 'off') return false;
+    return !penSeen;
+  }
+  const touchesDown = () => [...pointers.values()].filter((p) => p.type === 'touch');
+  const toSheet = (e) => sim.toSheet(e.clientX, e.clientY);
 
   // Apple Pencil reports 0..1 force; mouse/finger report 0 or 0.5. Give the
   // pen a wider, slightly convex range so light strokes go genuinely fine
@@ -913,29 +958,53 @@
     return base * (1 - r * 0.85 + pressure * r * 1.5);
   }
 
+  // A Pencil held at an angle lays its hairs along the paper. Safari reports
+  // altitude (pi/2 = upright) and azimuth (the way the barrel points, screen
+  // sense); older engines report tiltX/tiltY in degrees instead. The
+  // footprint stretches along the azimuth as the pen leans — the cheap
+  // version of a 3D brush, and the difference between a mark and a dot.
+  function shapeOf(e) {
+    if (!SET.tiltShape || e.pointerType !== 'pen') return null;
+    let alt = e.altitudeAngle, az = e.azimuthAngle;
+    if (alt == null || az == null) {
+      if (e.tiltX == null || e.tiltY == null) return null;
+      const tx = Math.tan((e.tiltX * Math.PI) / 180), ty = Math.tan((e.tiltY * Math.PI) / 180);
+      az = Math.atan2(ty, tx);
+      alt = Math.atan(1 / Math.max(Math.hypot(tx, ty), 1e-6));
+    }
+    if (!(alt >= 0)) return null;
+    const lean = 1 - Math.min(alt, Math.PI / 2) / (Math.PI / 2); // 0 upright .. 1 flat
+    const elong = 1 + 1.7 * Math.pow(lean, 1.4);
+    if (elong < 1.03) return null;
+    return { angle: az, elong };
+  }
+
   // One dab. `advance` is how far the brush travelled to get here, and it is
   // what the paint model charges for: a dab is not a fraction of the load, it
   // is the paint released over that much travel, and the brush loses exactly
   // that. Two consequences worth naming, because they are the whole point:
   // painting over the same line twice no longer doubles the colour, and a
   // stroke fades to a dry-brush tail without anything being faked.
-  function dab(x, y, pressure, advance) {
+  function dab(x, y, pressure, advance, shape) {
     DEMO.stop();
     const size = brushSize(pressure);
     const wasLoaded = brushFrac();
-    const d = brush.dab(advance, size, pressure, pigDep);
-    sim.splat(x, y, size, d.water, d.amp, d.wetness, d.scrub);
+    const d = brush.dab(advance, size, pressure, pigDep, {
+      flow: SET.pressFlow ? 1 : 0,
+      area: shape ? shape.elong : 1,
+    });
+    sim.splat(x, y, size, d.water, d.amp, d.wetness, d.scrub, shape);
     // a clean brush carrying real water re-dissolves paint that has only just
     // set, which is how a bloom starts
     if (wasLoaded < 0.015 && brush.water > 0.35) sim.rewet();
   }
 
-  function strokeTo(x, y, pressure) {
+  function strokeTo(x, y, pressure, shape) {
     // The very first touch of a stroke has travelled nowhere, so it is
     // charged for a step's worth of paint rather than nothing — otherwise a
     // tap would leave no mark at all.
     const stepLen = Math.max(Number(sizeEl.value) * 0.3, 2);
-    if (!last) { dab(x, y, pressure, stepLen); last = { x, y }; return; }
+    if (!last) { dab(x, y, pressure, stepLen, shape); last = { x, y }; return; }
     const dx = x - last.x, dy = y - last.y;
     const dist = Math.hypot(dx, dy);
     // A pen held still still reports samples, and each one used to become a
@@ -948,60 +1017,242 @@
     const n = Math.floor(dist / stepLen);
     const advance = dist / (n + 1); // each dab pays for its own share of the travel
     for (let i = 1; i <= n; i++) {
-      dab(last.x + (dx * i) / (n + 1), last.y + (dy * i) / (n + 1), pressure, advance);
+      dab(last.x + (dx * i) / (n + 1), last.y + (dy * i) / (n + 1), pressure, advance, shape);
     }
-    dab(x, y, pressure, advance);
+    dab(x, y, pressure, advance, shape);
     last = { x, y };
+  }
+
+  function beginStroke(e) {
+    stroke = {
+      id: e.pointerId, type: e.pointerType, saved: brush.remember(),
+      t0: performance.now(), sx: e.clientX, sy: e.clientY, moved: 0, shown: 0,
+    };
+    snapshot();
+    last = null;
+    const p = toSheet(e);
+    strokeTo(p.x, p.y, pressureOf(e), shapeOf(e));
+  }
+
+  function moveStroke(e) {
+    // every sample the pen reported since the last event, not just the last
+    // one (a synthetic event has none: then the event itself)
+    let events = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    if (!events.length) events = [e];
+    for (const ev of events) {
+      const p = toSheet(ev);
+      strokeTo(p.x, p.y, pressureOf(ev), shapeOf(ev));
+    }
+    stroke.moved = Math.max(stroke.moved, Math.hypot(e.clientX - stroke.sx, e.clientY - stroke.sy));
+    // the meters (and the CPU-rendered preview strip behind them) are not
+    // worth redrawing on every pen sample; a few times a second reads fine
+    const now = performance.now();
+    if (now - stroke.shown > 120) { stroke.shown = now; updateBrushView(); }
+  }
+
+  // Lifting the pen dips the brush again. Within a stroke the hairs run out
+  // and the line fades to dry-brush, which is the physics; between strokes
+  // the load comes back, which is the workflow every other painting app
+  // has. It used to stay spent: after one wash the artist held an empty, dry
+  // brush and had to rebuild it from two sliders and a pan.
+  function endStroke() {
+    if (!stroke) return;
+    brush.restore(stroke.saved);
+    LOGBOOK.log('refill');
+    sim.commitUndo();
+    stroke = null;
+    last = null;
+    updateBrushView();
+  }
+
+  // A finger that had started a mark and then became a gesture: the mark was
+  // never meant, so it goes.
+  function cancelStroke() {
+    if (!stroke) return;
+    brush.restore(stroke.saved);
+    stroke = null;
+    last = null;
+    if (sim.undo()) LOGBOOK.log('undo', { why: 'gesture' });
+    updateBrushView();
+  }
+
+  // ------------------------------------------------- finger navigation ---
+  // Pan with one finger, pinch to zoom with two, about the fingers. The
+  // anchor is re-taken whenever a finger joins or leaves, so the view never
+  // jumps. A two-finger tap undoes; pinching the sheet smaller than the
+  // screen snaps it back to fit on release.
+  const mid = (pts) => ({ x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 });
+  const span = (pts) => Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+
+  function anchorGesture() {
+    const v = sim.view;
+    gesture.anchor = { pts: touchesDown().map((p) => ({ x: p.x, y: p.y })), zoom: v.zoom, cx: v.cx, cy: v.cy };
+    gesture.fingers = Math.max(gesture.fingers, gesture.anchor.pts.length);
+  }
+  function startGesture() {
+    gesture = { t0: performance.now(), moved: 0, fingers: 0 };
+    anchorGesture();
+  }
+  function moveGesture() {
+    const pts = touchesDown();
+    const a = gesture.anchor;
+    if (pts.length !== a.pts.length) { anchorGesture(); return; }
+    for (let i = 0; i < pts.length; i++) {
+      gesture.moved = Math.max(gesture.moved, Math.hypot(pts[i].x - a.pts[i].x, pts[i].y - a.pts[i].y));
+    }
+    const C = { x: sim.cssW / 2, y: sim.cssH / 2 };
+    if (pts.length === 1) {
+      sim.setView(a.zoom, a.cx - (pts[0].x - a.pts[0].x) / a.zoom, a.cy - (pts[0].y - a.pts[0].y) / a.zoom);
+    } else {
+      const m0 = mid(a.pts), m1 = mid(pts);
+      // the sheet point that was under the fingers' midpoint stays under it
+      const Sx = (m0.x - C.x) / a.zoom + a.cx, Sy = (m0.y - C.y) / a.zoom + a.cy;
+      let zoom = a.zoom * (span(pts) / Math.max(span(a.pts), 1));
+      sim.setView(zoom, Sx, Sy);
+      zoom = sim.view.zoom; // after clamping
+      sim.setView(zoom, Sx - (m1.x - C.x) / zoom, Sy - (m1.y - C.y) / zoom);
+    }
+    updateCursor();
+  }
+  function endGesture() {
+    const g = gesture;
+    gesture = null;
+    const quick = performance.now() - g.t0 < 320 && g.moved < 14;
+    if (quick && g.fingers === 2) {
+      // two-finger tap: undo
+      sim.markDirty();
+      if (sim.undo()) {
+        LOGBOOK.log('undo', { why: 'twoFingerTap' });
+        updateBrushView(`Undone — ${sim.undoCount} step${sim.undoCount === 1 ? '' : 's'} left`);
+      } else updateBrushView('Nothing left to undo');
+      return;
+    }
+    const fit = Math.min(sim.cssW / sim.sheetW, sim.cssH / sim.sheetH);
+    if (sim.view.zoom < fit * 0.97) sim.fitView();
+    updateCursor();
+  }
+
+  // the ring on the paper is the brush at the sheet's scale
+  let cursorAt = null;
+  function updateCursor(e) {
+    if (e) cursorAt = { x: e.clientX, y: e.clientY, pressure: stroke ? pressureOf(e) : 0.6 };
+    if (!cursorAt) return;
+    const size = brushSize(cursorAt.pressure) * sim.view.zoom;
+    brushcursor.style.display = 'block';
+    brushcursor.style.left = cursorAt.x + 'px';
+    brushcursor.style.top = cursorAt.y + 'px';
+    brushcursor.style.width = size * 2 + 'px';
+    brushcursor.style.height = size * 2 + 'px';
+  }
+
+  function sprinkle(e) {
+    const p = toSheet(e);
+    const r = Number(sizeEl.value) * 1.6;
+    sim.sprinkleSalt(p.x, p.y, r);
+    LOGBOOK.log('salt', { x: Math.round(p.x), y: Math.round(p.y), r: Math.round(r) });
+    salting.last = p;
   }
 
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
-    canvas.setPointerCapture(e.pointerId);
-    if (mode === 'salt') {
-      salting = true;
-      snapshot();
-      saltLast = { x: e.offsetX, y: e.offsetY };
-      const r = Number(sizeEl.value) * 1.6;
-      sim.sprinkleSalt(e.offsetX, e.offsetY, r);
-      LOGBOOK.log('salt', { x: Math.round(e.offsetX), y: Math.round(e.offsetY), r: Math.round(r) });
-      return;
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* not every pointer can be captured */ }
+    pointers.set(e.pointerId, { type: e.pointerType, x: e.clientX, y: e.clientY });
+    if (e.pointerType === 'pen' && !penSeen) {
+      penSeen = true;
+      LOGBOOK.log('penSeen');
+      if (SET.fingerPaints === 'auto') updateBrushView('Pencil in hand: fingers now pinch to zoom and pan, a two-finger tap undoes');
     }
-    painting = true;
-    snapshot();
-    last = null;
-    strokeTo(e.offsetX, e.offsetY, pressureOf(e));
-  });
-  canvas.addEventListener('pointermove', (e) => {
-    const size = brushSize(painting ? pressureOf(e) : 0.6);
-    brushcursor.style.display = 'block';
-    brushcursor.style.left = e.clientX + 'px';
-    brushcursor.style.top = e.clientY + 'px';
-    brushcursor.style.width = size * 2 + 'px';
-    brushcursor.style.height = size * 2 + 'px';
-    if (salting) {
-      e.preventDefault();
-      const dist = saltLast ? Math.hypot(e.offsetX - saltLast.x, e.offsetY - saltLast.y) : 99;
-      if (dist > Number(sizeEl.value) * 1.2) {
-        const r = Number(sizeEl.value) * 1.6;
-        sim.sprinkleSalt(e.offsetX, e.offsetY, r);
-        LOGBOOK.log('salt', { x: Math.round(e.offsetX), y: Math.round(e.offsetY), r: Math.round(r) });
-        saltLast = { x: e.offsetX, y: e.offsetY };
+
+    if (e.pointerType === 'touch') {
+      // while the pen is down, the hand on the glass is a palm: ignored
+      if ((stroke && stroke.type !== 'touch') || (salting && salting.type !== 'touch')) {
+        pointers.delete(e.pointerId);
+        return;
       }
+      const touches = touchesDown();
+      const navigating = gesture || !fingersPaint() || touches.length >= 2;
+      if (navigating) {
+        // a second finger on a finger stroke means it was a gesture all
+        // along, if it had barely begun; otherwise the stroke simply ends
+        if (stroke && stroke.type === 'touch') {
+          if (stroke.moved < 24 && performance.now() - stroke.t0 < 400) cancelStroke(); else endStroke();
+        }
+        if (salting && salting.type === 'touch') { salting = null; sim.commitUndo(); }
+        if (gesture) anchorGesture(); else startGesture();
+        return;
+      }
+      if (stroke || salting) return; // a palm or a second hand while the pen is down
+    } else if (stroke && stroke.type === 'touch') {
+      // the pen arrives while a finger was painting: the pen wins
+      if (stroke.moved < 24 && performance.now() - stroke.t0 < 400) cancelStroke(); else endStroke();
+    } else if (stroke) {
+      return; // a second pen or mouse button: ignore
+    }
+
+    if (mode === 'salt') {
+      salting = { id: e.pointerId, type: e.pointerType, last: null };
+      snapshot();
+      sprinkle(e);
       return;
     }
-    if (!painting) return;
-    e.preventDefault();
-    const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    for (const ev of events) strokeTo(ev.offsetX, ev.offsetY, pressureOf(ev));
-    updateBrushView();
+    beginStroke(e);
+    updateCursor(e);
   });
-  canvas.addEventListener('pointerleave', () => { brushcursor.style.display = 'none'; });
-  const end = () => {
-    painting = false; last = null; salting = false; saltLast = null;
-    updateBrushView();
+
+  canvas.addEventListener('pointermove', (e) => {
+    const pt = pointers.get(e.pointerId);
+    if (pt) { pt.x = e.clientX; pt.y = e.clientY; }
+    if (pt && pt.type === 'touch' && gesture) { e.preventDefault(); moveGesture(); return; }
+    if (e.pointerType !== 'touch') updateCursor(e);
+    if (salting && e.pointerId === salting.id) {
+      e.preventDefault();
+      const p = toSheet(e);
+      const dist = salting.last ? Math.hypot(p.x - salting.last.x, p.y - salting.last.y) : 99;
+      if (dist > Number(sizeEl.value) * 1.2) sprinkle(e);
+      return;
+    }
+    if (!stroke || e.pointerId !== stroke.id) return;
+    e.preventDefault();
+    moveStroke(e);
+    if (e.pointerType === 'touch') updateCursor(e);
+  });
+
+  canvas.addEventListener('pointerleave', (e) => {
+    if (e.pointerType !== 'touch') { brushcursor.style.display = 'none'; cursorAt = null; }
+  });
+
+  const up = (e) => {
+    pointers.delete(e.pointerId);
+    if (stroke && e.pointerId === stroke.id) endStroke();
+    if (salting && e.pointerId === salting.id) { salting = null; sim.commitUndo(); }
+    if (gesture && e.pointerType === 'touch') {
+      if (touchesDown().length === 0) endGesture(); else anchorGesture();
+    }
+    if (e.pointerType === 'touch') { brushcursor.style.display = 'none'; cursorAt = null; }
   };
-  canvas.addEventListener('pointerup', end);
-  canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', up);
+
+  // Desktop: the wheel zooms about the cursor, and Ctrl/Cmd+Z undoes — so the
+  // same view and the same history can be checked without an iPad.
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const v = sim.view;
+    const S = sim.toSheet(e.clientX, e.clientY);
+    const zoom = v.zoom * Math.exp(-e.deltaY * 0.0022);
+    sim.setView(zoom, S.x, S.y);
+    const z = sim.view.zoom;
+    sim.setView(z, S.x - (e.clientX - sim.cssW / 2) / z, S.y - (e.clientY - sim.cssH / 2) / z);
+    updateCursor(e);
+  }, { passive: false });
+  window.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      document.getElementById('undo').click();
+    }
+  });
+  // for the console and automated tests
+  window.__input = { get stroke() { return stroke; }, get gesture() { return gesture; }, get penSeen() { return penSeen; } };
 
   // -------------------------------------------------- persistence / PWA ---
   // Snapshots the dried painting + workbench state; wet paint "dries"
@@ -1018,6 +1269,7 @@
         v: 1,
         savedAt: Date.now(),
         paper: { name: sim.paperName, seed: sim.paperSeed },
+        sheet: { w: sim.sheetW, h: sim.sheetH },
         channels: CHANNELS.map((c) => (c ? c.id : null)),
         pans: PANS.map((p) => ({ id: p.paint.id, chan: p.chan })),
         colours: PANS.length,
@@ -1031,6 +1283,7 @@
           saltsize: Number(saltsizeEl.value), runoff: runoffEl.checked,
           presssize: pressEl.checked, deplete: depleteEl.checked,
           tiltstrength: Number(tiltStrEl.value), pressrange: Number(pressRangeEl.value),
+          pressflow: pressFlowEl.checked, tiltshape: tiltShapeEl.checked, finger: fingerEl.value,
           quality: qualityEl.value,
         },
         painting: snap,
@@ -1049,6 +1302,9 @@
       // a restored palette may be a different size than the default
       sim.setChannelTextures(Math.max(1, Math.ceil(PANS.length / 4)));
       rebuildPans();
+      // the saved sheet keeps its own size and aspect, whatever screen it
+      // is restored on; the view fits it
+      if (st.sheet && st.sheet.w && st.sheet.h) sim.newSheet(st.sheet.w, st.sheet.h);
       if (st.paper && st.paper.name) {
         paperSel.value = st.paper.name;
         sim.setPaper(st.paper.name, st.paper.seed);
@@ -1073,6 +1329,9 @@
         if (s.deplete != null) depleteEl.checked = s.deplete;
         if (s.tiltstrength != null) tiltStrEl.value = s.tiltstrength;
         if (s.pressrange != null) pressRangeEl.value = s.pressrange;
+        if (s.pressflow != null) pressFlowEl.checked = s.pressflow;
+        if (s.tiltshape != null) tiltShapeEl.checked = s.tiltshape;
+        if (s.finger) fingerEl.value = s.finger;
         if (s.quality) qualityEl.value = s.quality;
         applySettings(false);
       }
@@ -1114,6 +1373,8 @@
       if (sim.needsStep()) {
         sim.step();
         sim.render();
+      } else if (sim.renderDirty) {
+        sim.render(); // the view moved; the sheet did not
       }
     }
     requestAnimationFrame(frame);

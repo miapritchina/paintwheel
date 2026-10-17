@@ -388,7 +388,8 @@
       <button id="salt" class="small" title="Salt: sprinkle into a damp wash for starbursts">🧂</button>
       <button id="wetview" class="small" title="Wetness view: see wet / satin / damp zones">👁</button>
       <button id="dry" class="small" title="Flash-dry the whole sheet (hold)">Dry</button>
-      <button id="undo" class="small" title="Undo the last stroke, salting or clear">↶</button>
+      <button id="undo" class="small" title="Undo the last stroke, salting or clear (or tap with two fingers)">↶</button>
+      <button id="fitview" class="small" title="Show the whole sheet">⤢</button>
     </div>
   </div>
   <div id="pigname"></div>
@@ -434,6 +435,13 @@
   <div class="setrow"><span>Pressure range</span><input id="pressrange" type="range" min="0" max="100" value="60"></div>
   <div class="setnote">How much Apple Pencil force changes the width of the stroke.</div>
 
+  <div class="setrow"><span>Finger paints</span><select id="fingerpaints">
+    <option value="auto" selected>Until a Pencil is used</option>
+    <option value="on">Always</option>
+    <option value="off">Never — fingers only navigate</option>
+  </select></div>
+  <div class="setnote">Fingers pinch to zoom, drag to pan and tap with two to undo. Whether one finger also paints: by default it does until an Apple Pencil touches the sheet, after which the Pencil paints and the hand navigates.</div>
+
   <div class="setrow check"><input id="runoff" type="checkbox" checked><span>Paint and water run off</span></div>
   <div class="setnote" style="padding-left:26px">On: washes spread, blooms travel, tilted paint runs downhill. Off: the sheet still wets and dries, but colour stays exactly where you put it.</div>
 
@@ -442,6 +450,12 @@
 
   <div class="setrow check"><input id="presssize" type="checkbox" checked><span>Pencil pressure → brush size</span></div>
   <div class="setnote" style="padding-left:26px">Apple Pencil force drives the width of the stroke. Off: the Size slider alone decides.</div>
+
+  <div class="setrow check"><input id="pressflow" type="checkbox" checked><span>Pencil pressure → paint flow</span></div>
+  <div class="setnote" style="padding-left:26px">Pressing harder lets paint leave the brush faster, so a firm pass is darker and a light one a tint. The brush still pays for every bit it lays. Off: pressure changes only the width.</div>
+
+  <div class="setrow check"><input id="tiltshape" type="checkbox" checked><span>Pencil tilt shapes the brush</span></div>
+  <div class="setnote" style="padding-left:26px">A leaning Pencil lays its hairs along the paper: the footprint stretches in the direction of the barrel, up to nearly three times as long. Upright, it is round.</div>
 
   <div id="settitle" style="margin-top:6px">The sheet</div>
   <div class="btnrow" style="max-width:420px;justify-content:center">

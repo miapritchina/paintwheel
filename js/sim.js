@@ -145,7 +145,7 @@ class WatercolorSim {
 
   _initPrograms() {
     this.progs = {};
-    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'probe', 'clear', 'copy']) {
+    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'probe', 'diff', 'clear', 'copy']) {
       this.progs[name] = this._program(name, SHADERS[name]);
     }
   }
@@ -184,27 +184,62 @@ class WatercolorSim {
     this.resize();
   }
 
+  // The SHEET is a fixed piece of paper with its own size in css pixels,
+  // decided when it is made and kept until a new painting. The screen is a
+  // VIEW onto it: a zoom and a centre. The two used to be the same thing —
+  // the sim grid was sized from the canvas — so turning the iPad, or Safari
+  // showing its toolbar, reallocated every texture and wiped the painting.
+  // Now a resize only changes the canvas backing store and re-fits the view.
   resize() {
-    const gl = this.gl;
     const dpr = Math.min(window.devicePixelRatio || 1, this.dprCap || 3);
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
     this.canvas.width = Math.round(cssW * dpr);
     this.canvas.height = Math.round(cssH * dpr);
+    this.cssW = cssW;
+    this.cssH = cssH;
+    if (!this.sheetW) {
+      this.newSheet(cssW, cssH);
+      return;
+    }
+    // The sheet stays; keep the grid resolution in step with the quality
+    // setting (which is the only thing allowed to resample the painting).
+    this._fitGrid(true);
+    this.fitView();
+    this.renderDirty = true;
+  }
 
-    const scale = Math.min(1, this.maxSim / Math.max(cssW, cssH));
-    const w = Math.max(64, Math.round(cssW * scale));
-    const h = Math.max(64, Math.round(cssH * scale));
+  // A fresh sheet sized to the screen it is made on (or an explicit size, as
+  // when a saved painting is restored). Clears the painting.
+  newSheet(w, h) {
+    this.sheetW = Math.max(64, Math.round(w || this.cssW || window.innerWidth));
+    this.sheetH = Math.max(64, Math.round(h || this.cssH || window.innerHeight));
+    this._fitGrid(false);
+    this.clearAll();
+    this.regenPaper(Math.random() * 100);
+    this.fitView();
+  }
+
+  // Allocate the grid for the current sheet and quality. `keep` resamples
+  // the painting into the new textures (a quality change mid-painting);
+  // otherwise the textures start empty.
+  _fitGrid(keep) {
+    const gl = this.gl;
+    const scale = Math.min(1, this.maxSim / Math.max(this.sheetW, this.sheetH));
+    const w = Math.max(64, Math.round(this.sheetW * scale));
+    const h = Math.max(64, Math.round(this.sheetH * scale));
     if (this.simW === w && this.simH === h) return;
+    const old = keep && this.flow ? { pairs: this._statePairs(), paper: this.paperTex, seed: this.paperSeed } : null;
     this.simW = w;
     this.simH = h;
     this.texel = [1 / w, 1 / h];
 
-    for (const p of ['flow', 'sat']) {
-      if (this[p]) this._deletePair(this[p]);
-      this[p] = this._makePair(w, h);
+    if (!old) {
+      for (const p of ['flow', 'sat']) if (this[p]) this._deletePair(this[p]);
+      if (this.susp) { this.susp.forEach((p) => this._deletePair(p)); this.dep.forEach((p) => this._deletePair(p)); }
     }
-    if (this.susp) { this.susp.forEach((p) => this._deletePair(p)); this.dep.forEach((p) => this._deletePair(p)); }
+    this.flow = this._makePair(w, h);
+    this.sat = this._makePair(w, h);
     this.susp = [];
     this.dep = [];
     for (let i = 0; i < PIG_TEXTURES; i++) {
@@ -213,12 +248,54 @@ class WatercolorSim {
     }
     this.clearUndo();
     if (this.probeTex) { gl.deleteTexture(this.probeTex); this.probeTex = null; }
-    if (this.paperTex) gl.deleteTexture(this.paperTex);
+    if (this._diffTex) { gl.deleteTexture(this._diffTex); this._diffTex = null; }
+    if (this._pre) { for (const t of this._pre) gl.deleteTexture(t); this._pre = null; }
+    if (!old && this.paperTex) gl.deleteTexture(this.paperTex);
     this.paperTex = this._makeTexture(w, h);
     if (!this.fbo) this.fbo = gl.createFramebuffer();
 
-    this.clearAll();
-    this.regenPaper(Math.random() * 100);
+    if (old) {
+      // bilinear resample of every state texture into the new grid
+      this._statePairs().forEach((p, i) => {
+        this._copyInto(old.pairs[i].read, p.read);
+        this._copyInto(old.pairs[i].read, p.write);
+        this._deletePair(old.pairs[i]);
+      });
+      gl.deleteTexture(old.paper);
+      this.regenPaper(old.seed != null ? old.seed : Math.random() * 100);
+      this.markDirty();
+    }
+  }
+
+  // ---------------------------------------------------------------- view --
+  // zoom: screen css px per sheet css px. (cx, cy): the sheet point, in sheet
+  // css px, drawn at the centre of the screen.
+  fitView() {
+    const zoom = Math.min(this.cssW / this.sheetW, this.cssH / this.sheetH);
+    this.view = { zoom, cx: this.sheetW / 2, cy: this.sheetH / 2 };
+    this.renderDirty = true;
+  }
+
+  setView(zoom, cx, cy) {
+    const fit = Math.min(this.cssW / this.sheetW, this.cssH / this.sheetH);
+    zoom = Math.max(fit * 0.5, Math.min(fit * 12, zoom));
+    // keep at least a quarter of the screen on paper, so the sheet cannot be
+    // pushed away out of reach
+    const halfW = this.cssW / zoom / 2, halfH = this.cssH / zoom / 2;
+    cx = Math.max(-halfW / 2, Math.min(this.sheetW + halfW / 2, cx));
+    cy = Math.max(-halfH / 2, Math.min(this.sheetH + halfH / 2, cy));
+    this.view = { zoom, cx, cy };
+    this.renderDirty = true;
+  }
+
+  // screen css px -> sheet css px, and back
+  toSheet(sx, sy) {
+    const v = this.view;
+    return { x: (sx - this.cssW / 2) / v.zoom + v.cx, y: (sy - this.cssH / 2) / v.zoom + v.cy };
+  }
+  toScreen(x, y) {
+    const v = this.view;
+    return { x: (x - v.cx) * v.zoom + this.cssW / 2, y: (y - v.cy) * v.zoom + this.cssH / 2 };
   }
 
   // -------------------------------------------------------- persistence ---
@@ -366,17 +443,35 @@ class WatercolorSim {
 
   // ----------------------------------------------------------------- undo --
   // The painting is not a list of strokes, it is the state of a fluid
-  // simulation, so undo has to be a snapshot of that state. Snapshots live
-  // on the GPU: a readPixels of ten textures per stroke would stall the
-  // pipeline hard enough to be felt.
+  // simulation, so undo has to restore that state: water, pigment still in
+  // suspension and deposits alike, or undoing into a half-dry wash would
+  // jump to a dried state that never existed.
   //
-  // Every texture is copied, not just the deposited pigment — undoing into a
-  // half-dry wash has to bring back the surface water and the pigment still
-  // in suspension, or the sheet would jump to a dried state that never
-  // existed.
+  // It used to copy every texture into a GPU slot per stroke — tens of
+  // megabytes each, which bought two or three steps on a phone and one on a
+  // big canvas. A mistake into a wash was unrecoverable, so people painted
+  // timidly. Now a step stores only the REGION a stroke changed, on the CPU:
   //
-  // A snapshot is w*h*8 bytes x 10 textures, which is tens of megabytes, so
-  // the depth is whatever fits a fixed budget rather than a fixed number.
+  //   pushUndo()    before anything marks the sheet: the whole state is
+  //                 copied into a GPU "pre" buffer (cheap), and a pending
+  //                 record starts collecting the texels touched.
+  //   _touch(box)   every splat / sprinkle / clear adds its footprint.
+  //   commitUndo()  when the stroke ends: the touched box plus everything
+  //                 wet is read back from "pre" now, while the user is not
+  //                 waiting on the pen.
+  //   _finalize()   at the next pushUndo (or at undo): the sheet has gone on
+  //                 flowing and drying since, so the cells that actually
+  //                 differ from "pre" are found on the GPU, and if they
+  //                 reach outside what was read early, the record is re-read
+  //                 to cover them. Then it goes on the stack.
+  //   undo()        writes the record's region straight back.
+  //
+  // A stroke on a dry sheet is a few hundred kilobytes; a wash over the whole
+  // sheet is the whole sheet. The depth is whatever fits the byte budget,
+  // which is dozens of ordinary strokes rather than two.
+  //
+  // If the GPU cannot read float textures back, the old whole-texture GPU
+  // slots are used instead, with their shallow depth.
   _statePairs() {
     return [this.flow, this.sat, ...this.susp, ...this.dep];
   }
@@ -387,12 +482,18 @@ class WatercolorSim {
   }
 
   get undoCount() {
-    return this._undo ? this._undo.stack.length : 0;
+    const u = this._undo;
+    if (!u) return 0;
+    return u.cpu ? u.stack.length + (u.pending ? 1 : 0) : u.gpuStack.length;
+  }
+
+  get undoBytes() {
+    return this._undo ? this._undo.bytes : 0;
   }
 
   clearUndo() {
     if (!this._undo) return;
-    for (const slot of [...this._undo.stack, ...this._undo.pool]) {
+    for (const slot of [...this._undo.gpuStack, ...this._undo.gpuPool]) {
       for (const t of slot) this.gl.deleteTexture(t);
     }
     this._undo = null;
@@ -404,40 +505,248 @@ class WatercolorSim {
     this._draw();
   }
 
-  pushUndo() {
-    if (!this._undo || this._undo.w !== this.simW || this._undo.h !== this.simH) {
-      this.clearUndo();
-      this._undo = { stack: [], pool: [], w: this.simW, h: this.simH };
-    }
+  _ensureUndo() {
     const u = this._undo;
+    if (u && u.w === this.simW && u.h === this.simH && u.n === PIG_TEXTURES) return u;
+    this.clearUndo();
+    this._undo = {
+      stack: [], pending: null, bytes: 0,
+      budget: this.undoBudget || 110e6,
+      cpu: this._cpuUndoOk !== false,
+      gpuStack: [], gpuPool: [],
+      w: this.simW, h: this.simH, n: PIG_TEXTURES,
+    };
+    return this._undo;
+  }
+
+  pushUndo() {
+    const u = this._ensureUndo();
+    this._finalize();
+    if (!u.cpu) return this._pushUndoGpu();
     const pairs = this._statePairs();
-    let slot = u.pool.pop();
-    if (!slot) {
-      if (u.stack.length >= this.undoDepth) slot = u.stack.shift(); // reuse oldest
-      else {
-        try {
-          slot = pairs.map(() => this._makeTexture(this.simW, this.simH));
-        } catch (e) {
-          if (!u.stack.length) return false;
-          slot = u.stack.shift(); // out of memory: settle for a shallower history
-        }
+    if (!this._pre || this._pre.length !== pairs.length) {
+      if (this._pre) for (const t of this._pre) this.gl.deleteTexture(t);
+      try {
+        this._pre = pairs.map(() => this._makeTexture(this.simW, this.simH));
+      } catch (e) {
+        this._pre = null;
+        u.cpu = false;
+        return this._pushUndoGpu();
       }
     }
-    pairs.forEach((p, i) => this._copyInto(p.read, slot[i]));
-    u.stack.push(slot);
+    pairs.forEach((p, i) => this._copyInto(p.read, this._pre[i]));
+    u.pending = { box: null, data: null, read: null };
     return true;
+  }
+
+  _touch(box) {
+    const u = this._undo;
+    if (!u || !u.pending || box.w <= 0 || box.h <= 0) return;
+    u.pending.box = this._unionBox(u.pending.box, box);
+  }
+
+  _unionBox(a, b) {
+    if (!a) return { ...b };
+    if (!b) return { ...a };
+    const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y);
+    const x1 = Math.max(a.x + a.w, b.x + b.w), y1 = Math.max(a.y + a.h, b.y + b.h);
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  _growBox(box, m) {
+    if (!box) return null;
+    const x0 = Math.max(0, box.x - m), y0 = Math.max(0, box.y - m);
+    const x1 = Math.min(this.simW, box.x + box.w + m), y1 = Math.min(this.simH, box.y + box.h + m);
+    return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
+  }
+
+  _containsBox(outer, inner) {
+    if (!inner) return true;
+    if (!outer) return false;
+    return inner.x >= outer.x && inner.y >= outer.y &&
+      inner.x + inner.w <= outer.x + outer.w && inner.y + inner.h <= outer.y + outer.h;
+  }
+
+  // The stroke is over: read its region back now, generously, so the next
+  // pen-down does not have to wait for the readback.
+  commitUndo() {
+    const u = this._undo;
+    if (!u || !u.pending || !u.cpu) return;
+    const wet = this._blockBox('probe', [['uFlow', this.flow.read], ['uSat', this.sat.read]]);
+    const box = this._growBox(this._unionBox(u.pending.box, wet), 12);
+    if (!box || box.w <= 0 || box.h <= 0) return;
+    const data = this._readRegion(this._pre, box);
+    if (!data) return;
+    u.pending.data = data;
+    u.pending.read = box;
+  }
+
+  // Close the pending record against what the sheet actually did.
+  _finalize() {
+    const u = this._undo;
+    if (!u || !u.pending) return;
+    const pend = u.pending;
+    u.pending = null;
+    if (!u.cpu) return;
+    const diff = this._blockBox('diff', [
+      ['uFlow', this.flow.read], ['uSat', this.sat.read],
+      ...this.dep.map((p, i) => [`uDep${i}`, p.read]),
+      ['uPreFlow', this._pre[0]], ['uPreSat', this._pre[1]],
+      ...this.dep.map((p, i) => [`uPreDep${i}`, this._pre[2 + this.susp.length + i]]),
+    ]);
+    let box = this._growBox(this._unionBox(pend.box, diff), 2);
+    if (!box || box.w <= 0 || box.h <= 0) return; // nothing changed: nothing to undo
+    let data = pend.data;
+    if (!data || !this._containsBox(pend.read, box)) {
+      data = this._readRegion(this._pre, box);
+      if (!data) return;
+    } else {
+      box = pend.read;
+    }
+    const bytes = data.reduce((s, a) => s + a.byteLength, 0);
+    u.stack.push({ box, data, bytes });
+    u.bytes += bytes;
+    while (u.bytes > u.budget && u.stack.length > 1) {
+      u.bytes -= u.stack.shift().bytes;
+    }
   }
 
   undo() {
     this.markDirty();
     const u = this._undo;
-    if (!u || !u.stack.length) return false;
-    const slot = u.stack.pop();
+    if (!u) return false;
+    this._finalize();
+    if (!u.cpu) return this._undoGpu();
+    const rec = u.stack.pop();
+    if (!rec) return false;
+    u.bytes -= rec.bytes;
+    const gl = this.gl;
+    const pairs = this._statePairs();
+    const { box } = rec;
+    pairs.forEach((p, i) => {
+      gl.bindTexture(gl.TEXTURE_2D, p.read);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, box.x, box.y, box.w, box.h, gl.RGBA, this._readType, rec.data[i]);
+    });
+    // and the write halves, so the pair agrees with itself
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(box.x, box.y, box.w, box.h);
+    for (const p of pairs) this._copyInto(p.read, p.write);
+    gl.disable(gl.SCISSOR_TEST);
+    // "pre" no longer describes the sheet; the next pushUndo rewrites it
+    return true;
+  }
+
+  // Read a texel rectangle of each texture to the CPU. Returns null (and
+  // disables CPU undo) if the GPU will not read floats back.
+  _readRegion(texs, box) {
+    const gl = this.gl;
+    if (!this._readFbo) this._readFbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._readFbo);
+    const out = [];
+    try {
+      for (const t of texs) {
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+        if (!this._readType) {
+          // HALF_FLOAT halves the memory and skips a conversion; take it
+          // when the implementation offers it, else FLOAT, which it must
+          const ty = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE);
+          this._readType = ty === gl.HALF_FLOAT ? gl.HALF_FLOAT : gl.FLOAT;
+        }
+        const n = box.w * box.h * 4;
+        const buf = this._readType === gl.HALF_FLOAT ? new Uint16Array(n) : new Float32Array(n);
+        gl.readPixels(box.x, box.y, box.w, box.h, gl.RGBA, this._readType, buf);
+        if (gl.getError() !== gl.NO_ERROR) throw new Error('readPixels failed');
+        out.push(buf);
+      }
+    } catch (e) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      this._cpuUndoOk = false;
+      if (this._undo) this._undo.cpu = false;
+      return null;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return out;
+  }
+
+  // Run a block-reduction shader over the grid at 64x64 and return the texel
+  // bounding box of the blocks it lit, or null if none did.
+  _blockBox(prog, inputs) {
+    const gl = this.gl;
+    const N = 64;
+    if (!this._diffTex) {
+      this._diffTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this._diffTex);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, N, N);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      this._diffBuf = new Uint8Array(N * N * 4);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this._diffTex, 0);
+    for (let i = 1; i < PIG_TEXTURES + 1; i++) {
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, null, 0);
+    }
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    gl.viewport(0, 0, N, N);
+    const p = this._use(prog, inputs);
+    gl.uniform2f(p.uniforms.uBlock, 1 / N, 1 / N);
+    this._draw();
+    let x0 = N, y0 = N, x1 = -1, y1 = -1;
+    try {
+      gl.readPixels(0, 0, N, N, gl.RGBA, gl.UNSIGNED_BYTE, this._diffBuf);
+      for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+          if (this._diffBuf[(j * N + i) * 4] > 2) {
+            if (i < x0) x0 = i; if (i > x1) x1 = i;
+            if (j < y0) y0 = j; if (j > y1) y1 = j;
+          }
+        }
+      }
+    } catch (e) {
+      x0 = 0; y0 = 0; x1 = N - 1; y1 = N - 1; // cannot tell: assume everything
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (x1 < 0) return null;
+    // a block's worth of margin on every side: the reduction samples the
+    // block sparsely and a change can sit between its samples
+    const bw = this.simW / N, bh = this.simH / N;
+    return this._growBox({
+      x: Math.floor(x0 * bw), y: Math.floor(y0 * bh),
+      w: Math.ceil((x1 + 1) * bw) - Math.floor(x0 * bw), h: Math.ceil((y1 + 1) * bh) - Math.floor(y0 * bh),
+    }, Math.ceil(Math.max(bw, bh)));
+  }
+
+  // ---- the whole-texture GPU fallback ----
+  _pushUndoGpu() {
+    const u = this._undo;
+    const pairs = this._statePairs();
+    let slot = u.gpuPool.pop();
+    if (!slot) {
+      if (u.gpuStack.length >= this.undoDepth) slot = u.gpuStack.shift();
+      else {
+        try {
+          slot = pairs.map(() => this._makeTexture(this.simW, this.simH));
+        } catch (e) {
+          if (!u.gpuStack.length) return false;
+          slot = u.gpuStack.shift();
+        }
+      }
+    }
+    pairs.forEach((p, i) => this._copyInto(p.read, slot[i]));
+    u.gpuStack.push(slot);
+    u.pending = { box: null, data: null, read: null, gpu: true };
+    return true;
+  }
+
+  _undoGpu() {
+    const u = this._undo;
+    const slot = u.gpuStack.pop();
+    if (!slot) return false;
     this._statePairs().forEach((p, i) => {
       this._copyInto(slot[i], p.write);
       p.swap();
     });
-    u.pool.push(slot);
+    u.gpuPool.push(slot);
     return true;
   }
 
@@ -491,6 +800,7 @@ class WatercolorSim {
   // --------------------------------------------------------------- state --
   clearAll() {
     this.markDirty();
+    this._touch({ x: 0, y: 0, w: this.simW, h: this.simH });
     const gl = this.gl;
     const pairs = [this.flow, this.sat, ...this.susp, ...this.dep];
     for (const pair of pairs) {
@@ -507,7 +817,7 @@ class WatercolorSim {
   // used to rinse a single segment of the mixing plate.
   clearRegion(x0Css, x1Css) {
     const gl = this.gl;
-    const cssW = this.canvas.clientWidth || this.canvas.width;
+    const cssW = this.sheetW;
     const px0 = Math.max(0, Math.floor((x0Css / cssW) * this.simW));
     const px1 = Math.min(this.simW, Math.ceil((x1Css / cssW) * this.simW));
     if (px1 <= px0) return;
@@ -582,24 +892,41 @@ class WatercolorSim {
 
   // --------------------------------------------------------------- brush --
   // pig: Float32Array(16) of pigment amounts; water in [0..~0.1]
-  splat(xCss, yCss, radiusCss, water, pig, wetness, scrub = 0) {
+  // Coordinates are SHEET css px (see resize). `shape`, optional, is the
+  // footprint of a tilted pen: { angle, elong } stretches the dab `elong`
+  // times along `angle` (radians, screen sense, y down). The caller has
+  // already divided the amplitudes by `elong` so the mass laid is unchanged.
+  //
+  // A dab touches a few hundred texels, so the pass is scissored to its
+  // footprint rather than drawn over the whole grid: a fine brush spaces its
+  // dabs two pixels apart and a quick line used to fire hundreds of
+  // full-grid passes a second, which is where the lag and the heat on small
+  // brushes came from. The ping-pong is replaced by a write-then-copy-back
+  // of the same region, so neither texture of a pair goes stale.
+  splat(xCss, yCss, radiusCss, water, pig, wetness, scrub = 0, shape = null) {
     this.markDirty();
     const gl = this.gl;
-    const cssW = this.canvas.clientWidth || window.innerWidth;
-    const cssH = this.canvas.clientHeight || window.innerHeight;
-    const u = xCss / cssW;
-    const v = 1 - yCss / cssH;
-    const aspect = cssW / cssH;
+    const sw = this.sheetW, sh = this.sheetH;
+    const u = xCss / sw;
+    const v = 1 - yCss / sh;
+    const aspect = sw / sh;
+    const elong = shape && shape.elong > 1 ? Math.min(shape.elong, 4) : 1;
+    const ang = shape ? -(shape.angle || 0) : 0; // y flips between screen and uv
 
-    this._bindOutputs([this.flow.write, ...this.susp.map((p) => p.write)]);
+    const box = this._footprint(u, v, (radiusCss * elong) / sw, (radiusCss * elong) / sh);
+    this._touch(box);
+    const targets = [this.flow, ...this.susp];
+    this._bindOutputs(targets.map((p) => p.write));
     const p = this._use('splat', [
       ['uFlow', this.flow.read],
       ...this._suspInputs(),
       ['uPaper', this.paperTex],
     ]);
     gl.uniform2f(p.uniforms.uCenter, u, v);
-    gl.uniform1f(p.uniforms.uRadius, radiusCss / cssW);
+    gl.uniform1f(p.uniforms.uRadius, radiusCss / sw);
     gl.uniform2f(p.uniforms.uAspect, 1.0, 1.0 / aspect);
+    gl.uniform2f(p.uniforms.uAxis, Math.cos(ang), Math.sin(ang));
+    gl.uniform1f(p.uniforms.uElong, elong);
     gl.uniform1f(p.uniforms.uWaterAmt, water);
     for (let i = 0; i < PIG_TEXTURES; i++) {
       gl.uniform4f(p.uniforms[`uPig${i}`], pig[i * 4], pig[i * 4 + 1], pig[i * 4 + 2], pig[i * 4 + 3]);
@@ -607,9 +934,44 @@ class WatercolorSim {
     gl.uniform1f(p.uniforms.uWetness, wetness);
     gl.uniform1f(p.uniforms.uPush, Math.min(0.6, water * 8.0));
     gl.uniform1f(p.uniforms.uScrub, scrub);
+    this._drawRegion(box);
+    this._copyBackRegion(targets, box);
+  }
+
+  // The texel rectangle a circle of uv radius (ru, rv) at (u, v) covers,
+  // with a margin for the soft edge: {x, y, w, h} in sim texels.
+  _footprint(u, v, ru, rv) {
+    const m = 2;
+    const x0 = Math.max(0, Math.floor((u - ru) * this.simW) - m);
+    const y0 = Math.max(0, Math.floor((v - rv) * this.simH) - m);
+    const x1 = Math.min(this.simW, Math.ceil((u + ru) * this.simW) + m);
+    const y1 = Math.min(this.simH, Math.ceil((v + rv) * this.simH) + m);
+    return { x: x0, y: y0, w: Math.max(0, x1 - x0), h: Math.max(0, y1 - y0) };
+  }
+
+  _drawRegion(box) {
+    const gl = this.gl;
+    if (box.w <= 0 || box.h <= 0) return;
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(box.x, box.y, box.w, box.h);
     this._draw();
-    this.flow.swap();
-    this.susp.forEach((pr) => pr.swap());
+    gl.disable(gl.SCISSOR_TEST);
+  }
+
+  // After a scissored pass into each pair's write texture, bring the same
+  // region back into the read texture — the pair is then identical again and
+  // nothing has to swap.
+  _copyBackRegion(pairs, box) {
+    const gl = this.gl;
+    if (box.w <= 0 || box.h <= 0) return;
+    gl.enable(gl.SCISSOR_TEST);
+    gl.scissor(box.x, box.y, box.w, box.h);
+    for (const pr of pairs) {
+      this._bindOutputs([pr.read]);
+      this._use('copy', [['uTex', pr.write]]);
+      this._draw();
+    }
+    gl.disable(gl.SCISSOR_TEST);
   }
 
   // ---------------------------------------------------------------- step --
@@ -726,7 +1088,12 @@ class WatercolorSim {
     gl.uniform4fv(p.uniforms.uGamma, this._pigParams.gamma);
     gl.uniform4fv(p.uniforms.uGrain, this._pigParams.grain);
     gl.uniform1f(p.uniforms.uWetView, this.wetView ? 1 : 0);
+    const v = this.view || { zoom: 1, cx: this.sheetW / 2, cy: this.sheetH / 2 };
+    gl.uniform4f(p.uniforms.uView,
+      this.cssW / (v.zoom * this.sheetW), this.cssH / (v.zoom * this.sheetH),
+      v.cx / this.sheetW, 1 - v.cy / this.sheetH);
     this._draw();
+    this.renderDirty = false;
   }
 
   // Sprinkle salt into the wash: grains soak water and shove pigment into
@@ -734,19 +1101,21 @@ class WatercolorSim {
   sprinkleSalt(xCss, yCss, radiusCss) {
     this.markDirty();
     const gl = this.gl;
-    const cssW = this.canvas.clientWidth || window.innerWidth;
-    const cssH = this.canvas.clientHeight || window.innerHeight;
+    const sw = this.sheetW, sh = this.sheetH;
+    const u = xCss / sw, v = 1 - yCss / sh;
+    const box = this._footprint(u, v, radiusCss / sw, radiusCss / sh);
+    this._touch(box);
     this._bindOutputs([this.sat.write]);
     const p = this._use('salt', [['uSat', this.sat.read]]);
-    gl.uniform2f(p.uniforms.uCenter, xCss / cssW, 1 - yCss / cssH);
-    gl.uniform1f(p.uniforms.uRadius, radiusCss / cssW);
-    gl.uniform2f(p.uniforms.uAspect, 1.0, cssH / cssW);
+    gl.uniform2f(p.uniforms.uCenter, u, v);
+    gl.uniform1f(p.uniforms.uRadius, radiusCss / sw);
+    gl.uniform2f(p.uniforms.uAspect, 1.0, sh / sw);
     gl.uniform1f(p.uniforms.uSeed, Math.random() * 100);
     gl.uniform1f(p.uniforms.uDensity, this.params.saltDensity);
     gl.uniform1f(p.uniforms.uSpacing, this.params.saltSpacing);
     gl.uniform1f(p.uniforms.uGrainSize, this.params.saltGrain);
-    this._draw();
-    this.sat.swap();
+    this._drawRegion(box);
+    this._copyBackRegion([this.sat], box);
   }
 
   // Average pigment mixture + water under a brush footprint (css px), used
@@ -754,8 +1123,8 @@ class WatercolorSim {
   // pixel per pigment texture at the sim cell under the center.
   readMix(xCss, yCss) {
     const gl = this.gl;
-    const cssW = this.canvas.clientWidth || this.canvas.width;
-    const cssH = this.canvas.clientHeight || this.canvas.height;
+    const cssW = this.sheetW;
+    const cssH = this.sheetH;
     const px = Math.max(0, Math.min(this.simW - 1, Math.round((xCss / cssW) * this.simW)));
     const py = Math.max(0, Math.min(this.simH - 1, Math.round((1 - yCss / cssH) * this.simH)));
     const out = { pig: new Float32Array(PIG_TEXTURES * 4), water: 0 };

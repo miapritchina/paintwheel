@@ -130,17 +130,31 @@ const BRUSH = (() => {
     //   advance  css px travelled since the previous dab
     //   radius   css px, after pressure
     //   pressure 0..1
+    //   opts     { flow: 0|1 (pressure drives release), area: footprint
+    //              area relative to a disc of `radius`, e.g. the elongation
+    //              of a tilted pen's footprint }
     //
     // Returns the peak amplitudes to hand the splat shader, plus the water.
     // The caller does not get to scale these: a dab IS this much paint.
-    dab(advance, radius, pressure, out) {
+    dab(advance, radius, pressure, out, opts) {
       const amp = out || new Float32Array(N_CHANNELS);
       const len = RELEASE[api.releaseMode] || RELEASE.real;
+      const flow = opts && opts.flow != null ? opts.flow : 1;
+      const area = opts && opts.area > 0 ? opts.area : 1;
 
       // Release scales with contact width as well as distance, so a wide
       // brush spends its load faster over the same path and the DEPTH it
       // leaves comes out the same as a fine one.
-      const reach = Math.max(advance, 0) * (radius / REF_RADIUS);
+      //
+      // Pressing harder presses more of the belly onto the sheet and lets go
+      // of paint faster: `press` runs from 0.46 (a touch) to 1.36 (leaning
+      // on it) and is 1.0 at the 0.6 a finger reports, so a mouse or finger
+      // paints as before. It scales the RATE, not the mass: the brush still
+      // pays for every bit it lays, so a hard pass is darker only because it
+      // spent more of the load there. This is what a Pencil user's hand
+      // already knows from every other painting app.
+      const press = 1 + flow * (0.9 * pressure - 0.54);
+      const reach = Math.max(advance, 0) * (radius / REF_RADIUS) * press;
       // With no depletion the brush still has to decide how much to lay per
       // dab; it just does not pay for it. Use the generous rate so an
       // unlimited brush paints at a believable strength rather than a flat
@@ -149,7 +163,9 @@ const BRUSH = (() => {
         ? 1 - Math.exp(-reach / RELEASE.generous)
         : 1 - Math.exp(-reach / len);
 
-      const k = 1 / (FOOTPRINT * radius * radius);
+      // a stretched footprint covers `area` times the paper, so the same
+      // mass goes on `area` times thinner
+      const k = 1 / (FOOTPRINT * radius * radius * area);
       for (let i = 0; i < N_CHANNELS; i++) {
         const mass = api.pig[i] * frac;
         amp[i] = mass * k;
@@ -176,6 +192,20 @@ const BRUSH = (() => {
     },
 
     rinse() { api.pig.fill(0); },
+
+    // The load as it stands, and putting it back: a stroke spends the hairs,
+    // lifting the pen dips them again. Every other painting app refills the
+    // brush between strokes; here it was documented and never done, so after
+    // one wash the artist held an empty, dry brush and had to rebuild it
+    // from two sliders and a pan before the next mark.
+    remember() {
+      return { water: api.water, pig: Float32Array.from(api.pig) };
+    },
+    restore(saved) {
+      if (!saved) return;
+      api.water = saved.water;
+      api.pig.set(saved.pig);
+    },
   };
 
   return api;

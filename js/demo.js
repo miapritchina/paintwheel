@@ -9,8 +9,9 @@ const DEMO = (() => {
   let t0 = 0;
   let events = [];
 
-  const W = () => window.innerWidth;
-  const H = () => window.innerHeight;
+  // the demo paints in sheet coordinates, which is what sim.splat takes
+  const W = () => (window.sim && sim.sheetW) || window.innerWidth;
+  const H = () => (window.sim && sim.sheetH) || window.innerHeight;
   const pig = new Float32Array(N_CHANNELS);
   // working-palette pan slots (mapped to channels at drop time)
   const CAD_LEMON = 0, BURNT_SIENA = 2, QUIN_PINK = 3, ULTRAMARINE = 4,
