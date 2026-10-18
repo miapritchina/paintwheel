@@ -38,15 +38,20 @@ The model follows Curtis, Anderson, Seims, Fleischer & Salesin,
 *Computer-Generated Watercolor* (SIGGRAPH 1997), with boundary-evaporation
 ideas from Chu & Tai, *MoXi: Real-Time Ink Dispersion in Absorbent Paper*
 (SIGGRAPH 2005), implemented as WebGL2 fragment-shader passes over ping-ponged
-RGBA16F textures:
+RGBA32F textures (RGBA16F where the GPU cannot render to full floats):
 
-1. **Shallow-water layer** — water depth + velocity driven by the water
-   surface slope and paper relief, with viscous drag and outward drift at the
-   wash boundary (the "coffee ring" effect that makes edges dry darker).
+1. **Shallow-water layer** — a film of water on the sheet. It levels under
+   its own weight and surface tension, as an exchange between neighbouring
+   cells; a velocity field carries the Marangoni flow, device tilt, the
+   outward drift at a wash boundary (the "coffee ring" effect that makes
+   edges dry darker) and a gentle drift into the paper's valleys.
 2. **Pigment layers** — 12 real pigments tracked individually, each as
    *suspended* (moving with the water) and *deposited* (settled on the sheet)
-   concentration. Deposition/lifting uses Curtis' equations with each
-   pigment's measured **density**, **staining power** and **granulation**.
+   concentration. Suspended pigment rides exactly the water that moves: the
+   same face fluxes, the same levelling exchange, at the concentration of
+   the cell the water came from. Deposition/lifting uses Curtis' equations
+   with each pigment's measured **density**, **staining power** and
+   **granulation**.
 3. **Capillary layer** — water absorbed into the sheet wicks between fibers;
    when it seeps back into a drying wash it re-wets it and produces
    **backruns** ("cauliflowers").
@@ -95,7 +100,56 @@ Beyond the papers, the model borrows two effects:
   the paper were glass instead of dying out as the sheet drank it.
 - **Pinned contact line** — a wash boundary stays put while rim evaporation
   draws interior fluid (and pigment) outward: the coffee-ring effect that
-  dries into dark edge lines.
+  dries into dark edge lines. Water crosses onto dry paper only from a film
+  deeper than the sheet's capillary barrier (a dab of a wet brush leaves
+  about 0.04; the barrier opens between 0.035 and 0.07), so an ordinary
+  stroke keeps the edge its brush gave it and only a flooded passage
+  creeps. Inside the wet mask flow is free.
+
+### What the numbers had to say
+
+The marks were checked against a sheet of real painter's marks
+(`test/scenes.html`) and the physics against mass totals
+(`test/variants.html`), and both found faults that no amount of tuning had
+reached:
+
+- **Pigment was being invented.** The semi-Lagrangian resample that moved
+  suspended pigment is not conservative, and in the outward flow at a wash
+  rim it stretched pigment into being: 60% more over one stroke's drying.
+  Underneath that, the state textures were half floats, which resolve about
+  one part in a thousand, and most of what happens to a wash in a substep
+  is smaller: a slow settling takes 0.06% of the suspended pigment. In half
+  floats "suspended minus that" rounds back to the same number while
+  "deposit plus that" is representable, so every substep made pigment and
+  settling itself stalled. Transport is now one conservative upwind pass
+  for water and pigment together, and the state lives in full floats where
+  the GPU can render and filter them (every iPad since WebGL2 can; the
+  half-float path remains as a fallback). Measured: a wash plus a stroke
+  plus a bloom, dried, holds its pigment to the unit.
+- **A stroke's water was gone in under five seconds.** The imbibition term
+  meant for tilted runs fired on the brush's own push. The rates are now
+  set so one stroke's water has a half-life of about 600 steps — ten
+  seconds at 60 fps, twenty at the drying slider's default — and pigment
+  stays mobile for most of it.
+- **The film flow blew up on puddles.** Lubrication says a deeper film
+  flows faster, but an explicit scheme can only carry a diffusion number
+  under a quarter; a puddle of 0.9 drove the velocity to its cap, flipping
+  sign every substep, until a cell gave more than it had and the clamp at
+  zero flooded the sheet by twelve percent a substep. The mobility now
+  saturates at a film of 0.04, the levelling is a face exchange capped at
+  0.12 per face (the cell-velocity form also decoupled odd and even cells
+  and dried with a fingerprint of ripples), and the speed cap is 0.1 so
+  four faces and the exchange together can never empty a cell.
+- **Every edge grew hairs.** The Marangoni term had the steepest pigment
+  gradient of all at the rim of a stroke on dry paper and shoved fluid off
+  it along the fibre noise. It is gated on every neighbour being wet: a
+  bloom inside a wash satisfies that, a contact line never does.
+- **Washes dried as clouds.** The sheet's absorbency varied by half its
+  base over fifty-texel patches, so one part of a wash drank its water
+  well before the next and dried as internal fronts. It is gentler and
+  finer now; the fibre field is lanes rather than speckle, which is what
+  breaks an advancing bloom into fingers; and rim evaporation is a fifth of
+  what it was, a ring being a share of the pigment, not the lot.
 
 ## The brush: two independent axes
 
@@ -453,6 +507,9 @@ way to report "this didn't behave like real watercolor".
 - `js/main.js` — UI, pointer/stylus input, finger navigation
 - `js/demo.js` — scripted showcase (blooms, strokes, granulation, backrun)
 - `tools/tells.js` + `test/tells.html` — the paint model's regression sheet
+- `tools/scenes.js` + `test/scenes.html` — the painter's marks, rendered to
+  PNG to be judged by eye (`--page variants` renders `test/variants.html`,
+  the same marks under several physics settings with mass totals traced)
 - `tools/input.js` — the input contract, checked headlessly against the app
 
 ## PWA & persistence

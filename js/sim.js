@@ -90,7 +90,8 @@ class WatercolorSim {
       // the levelling carries pigment with it (see advect).
       smooth: 0.3,
       // Drying budget, applied in PULSES (see dryPulse). The state textures
-      // are RGBA16F, so a per-substep decrement smaller than ~0.05% of the
+      // were RGBA16F (now RGBA32F where the GPU allows; the pulsing is kept
+      // for the half-float fallback), so a per-substep decrement smaller than ~0.05% of the
       // stored value rounds away to nothing — which silently froze drying
       // entirely once the rates were slowed to a realistic pace. Applying
       // the same total loss once every `dryPulse` substeps keeps every
