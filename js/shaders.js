@@ -197,6 +197,7 @@ ${RP.map((i) => `  oSusp${i} = g${i};`).join('\n')}
 SHADERS.velocity = `#version 300 es
 ${COMMON}
 uniform sampler2D uFlow;
+uniform sampler2D uSat;
 uniform sampler2D uPaper;
 ${RP.map((i) => `uniform sampler2D uSusp${i};`).join('\n')}
 uniform float uGrav;
@@ -245,8 +246,10 @@ void main() {
   vec2 target = -uGrav * grad * mob;
 
   // rim drift: evaporation at the pinned wash edge pulls interior fluid out
+  // — at the outer edge on dry paper, not at a spot drying inside a wash
+  float outer = 1.0 - smoothstep(0.04, 0.14, texture(uSat, vUV).x);
   vec2 gw = 0.5 * vec2(fr.w - fl.w, ft.w - fb.w);
-  target += -uEdgeFlow * gw * smoothstep(0.0005, 0.01, h);
+  target += -uEdgeFlow * gw * smoothstep(0.0005, 0.01, h) * outer;
 
   // Marangoni flow: paint lowers surface tension, so fluid is pulled from
   // painted regions toward clean water (log-concentration per the Gibbs
@@ -267,7 +270,12 @@ void main() {
   // surface: it is gated on every neighbour being wet, which a bloom inside
   // a wash satisfies and a contact line never does.
   float wmin = min(min(fl.w, fr.w), min(fb.w, ft.w));
-  target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.003, 0.018, h) * wmin;
+  // And it needs a real gradient: a boundary between paint and water, not
+  // the cell-to-cell noise of a flat wash, which the division amplified
+  // into swirls through every wash (without this term a wash dried clean).
+  float rel = length(gp) / (pc + 0.02);
+  float real = smoothstep(0.08, 0.25, rel);
+  target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.003, 0.018, h) * wmin * real;
 
   // device tilt: only a genuinely wet film runs (drips), damp washes hold;
   // fiber modulation breaks the advancing front into fingers
@@ -390,7 +398,7 @@ ${RP.map((i) => `  vec4 n${i} = g${i} - uDt * ((uR > 0.0 ? g${i} * uR : gr${i} *
     float hf = max(f.x, fn.x);
     float mobf = hf / (hf + 0.02) * min(1.0, 0.04 / max(hf, 1e-5));
     float open = uPin.y <= 0.0 ? 1.0 : mix(smoothstep(uPin.x, uPin.y, hf), 1.0, min(f.w, fn.w));
-    float c = min(0.12, 0.25 * (uSmooth + uGrav * mobf)) * open;
+    float c = min(0.05, 0.25 * (uSmooth + uGrav * mobf)) * open;
     float ex = c * (fn.x - f.x);
     float dif = uPigDiff * uDt * 0.25 * min(f.w, fn.w) * min(mobC, smoothstep(0.0005, 0.01, fn.x));
     float cn = ex > 0.0 ? ex / max(fn.x, 1e-5) : ex / h0;
@@ -432,7 +440,12 @@ void main() {
     for (int i = -1; i <= 1; i++)
       wavg += texture(uFlow, vUV + vec2(float(i), float(j)) * uTexel * 2.0).w;
   wavg /= 9.0;
-  float edge = clamp(w - wavg, 0.0, 1.0);
+  // The rim of a wash on dry paper evaporates fastest (the coffee ring).
+  // An internal front — a spot that dried first inside a long-drying wash
+  // — sits on a damp sheet and gets no such boost, or the wash dries as a
+  // foam of pale cells with dark walls.
+  float outer = 1.0 - smoothstep(0.04, 0.14, s.x);
+  float edge = clamp(w - wavg, 0.0, 1.0) * outer;
 
   h -= uDt * uEvap * (1.0 + uEdgeEvap * edge) * smoothstep(0.0, 0.0005, h);
 
@@ -501,7 +514,10 @@ void main() {
              : k == 2 ? vec2(0.0, uTexel.y) : vec2(0.0, -uTexel.y);
     float sn = texture(uSat, vUV + off).x;
     vec4 fn = texture(uFlow, vUV + off);
-    wetNbr = max(wetNbr, fn.w * smoothstep(0.001, 0.01, fn.x));
+    // only a neighbour carrying FRESH water counts — a dab's worth, not the
+    // thin film of a drying front, or every drying wash blistered into
+    // cauliflowers wherever a spot dried first
+    wetNbr = max(wetNbr, fn.w * smoothstep(0.012, 0.03, fn.x));
     if (sn > uWickThresh) transfer += max(sn - s.x, 0.0);
     if (s.x > uWickThresh) transfer -= max(s.x - sn, 0.0);
   }

@@ -62,7 +62,7 @@ class WatercolorSim {
       // Velocity memory: lets drop impulses ripple outward. 0.8 made the
       // film ring like a struck bell — standing ripples across every wash
       // once the water lasted long enough to show them.
-      inertia: 0.4,
+      inertia: 0.2,
       // Marangoni strength. Measured on a lightly-wetted sheet, a drop of
       // colour reaches 2247 cells at 1.0, 3937 at 2.0 and 5864 at 3.5; at
       // 1.0 wet-on-wet barely reacted, which is not what a wet sheet does.
@@ -1032,7 +1032,7 @@ class WatercolorSim {
       // 1. velocity
       this._bindOutputs([this.flow.write]);
       let p = this._use('velocity', [
-        ['uFlow', this.flow.read], ['uPaper', this.paperTex],
+        ['uFlow', this.flow.read], ['uSat', this.sat.read], ['uPaper', this.paperTex],
         ...this._suspInputs(),
       ]);
       gl.uniform1f(p.uniforms.uGrav, P.grav);
