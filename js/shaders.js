@@ -167,7 +167,9 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);`).join('\n')}
   // and worth keeping, but it belongs to a genuinely dry brush, not to two
   // thirds of the slider.
   m *= mix(contact, 1.0, smoothstep(0.30, 0.55, uWetness));
-  m *= 0.85 + 0.3 * pap.z;
+  // the sheet's tooth roughens the dab's edge a little; the fibre lanes
+  // (pap.z) are for flow, and as a mask they streaked every mark
+  m *= 0.9 + 0.2 * pap.x;
 
   // uPig is a peak optical depth, already worked out on the CPU so that this
   // dab lays exactly the mass the brush gave up (see js/brush.js — the
@@ -233,7 +235,11 @@ void main() {
   // exchange instead. Done here as a cell velocity from a central
   // difference it decoupled odd and even cells, and a wash dried with a
   // fingerprint of ripples through it.
-  float ps = uPaperSlope * 0.05;
+  // Gentle: with the film's own levelling gone from here this is the
+  // only flow a quiet wash has, and at 0.05 it carried every pigment into
+  // the valleys over a long drying — a staining wash came out as mottled
+  // as a granulating one. Granulation belongs to the deposition rates.
+  float ps = uPaperSlope * 0.015;
   vec2 grad = 0.5 * vec2(pr - pl, pt - pb) * ps;
   float mob = h / (h + 0.02) * min(1.0, 0.04 / max(h, 1e-5));
   vec2 target = -uGrav * grad * mob;
@@ -245,7 +251,7 @@ void main() {
   // Marangoni flow: paint lowers surface tension, so fluid is pulled from
   // painted regions toward clean water (log-concentration per the Gibbs
   // isotherm) — this drives wet-on-wet blooms. Fibers modulate -> feathering.
-  float fiber = 0.3 + 1.4 * texture(uPaper, vUV).z;
+  float fiber = 0.5 + 1.0 * texture(uPaper, vUV).z;
   float pc = pigTotal(vUV);
   vec2 gp = 0.5 * vec2(pigTotal(vUV + vec2(uTexel.x, 0.0)) - pigTotal(vUV - vec2(uTexel.x, 0.0)),
                        pigTotal(vUV + vec2(0.0, uTexel.y)) - pigTotal(vUV - vec2(0.0, uTexel.y)));

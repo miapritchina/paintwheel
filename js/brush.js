@@ -42,7 +42,12 @@ const BRUSH = (() => {
   // "everything looks potent and all the settings look the same" complaint
   // in its purest form. Kubelka-Munk saturates, so the working range has to
   // sit under the knee.
-  const PIG_CAP = 24000;
+  //
+  // Re-set at 40000 when the engine stopped inventing pigment: the old
+  // transport stretched 60% more into being over a stroke's drying, and
+  // the ladder was calibrated on top of that. Measured again on the same
+  // ladder, this puts the top step back where it was.
+  const PIG_CAP = 40000;
 
   // A dab lays its pigment with a soft profile, not a flat disc: the splat
   // shader's mask is 1 inside 0.3r and smoothsteps out to nothing at r. The

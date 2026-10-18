@@ -123,7 +123,7 @@ class WatercolorSim {
       // Global time scale on Curtis deposition rates. Pigment stays mobile
       // while the wash is wet: half of a stroke's load settles in ~400
       // steps, the rest as the film thins (dryBoost in transfer).
-      settle: 0.012,
+      settle: 0.02,
       lift: 0.012,      // resolubility: rewet-lift rate per step
       saltPush: 6.0,    // salt starburst pigment repulsion (texels)
       saltSpacing: 9.0, // mean spacing between grains (sim texels)
