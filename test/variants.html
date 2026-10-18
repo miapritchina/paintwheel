@@ -53,7 +53,7 @@ function wetPatch(x, y, r, water = 0.9) {
   }
 }
 function dryOut(maxSteps = 900) {
-  const was = sim.params.drySpeed; sim.params.drySpeed = 120;
+  const was = sim.params.drySpeed; sim.params.drySpeed = 600;
   for (let i = 0; i < maxSteps; i += 15) { for (let k = 0; k < 15; k++) sim.step(); if (!sim.anythingWet()) break; }
   sim.params.drySpeed = was;
 }

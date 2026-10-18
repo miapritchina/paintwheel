@@ -92,7 +92,8 @@ function run(steps) { for (let i = 0; i < steps; i++) sim.step(); }
 // that happens to hold more water must not be measured half-wet.
 function dryOut(maxSteps = 900) {
   const was = sim.params.drySpeed;
-  sim.params.drySpeed = 120;
+  // the sheet dries about eight times slower than when this was 120x
+  sim.params.drySpeed = 600;
   let i = 0;
   for (; i < maxSteps; i += 15) {
     for (let k = 0; k < 15; k++) sim.step();

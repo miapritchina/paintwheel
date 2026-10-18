@@ -28,7 +28,7 @@ const W = 1020, H = 700;
 const cv = document.getElementById('sheet');
 cv.style.width = W + 'px';
 cv.style.height = H + 'px';
-const sim = new WatercolorSim(cv, { paper: 'rough', maxSim: 520 });
+const sim = new WatercolorSim(cv, { paper: 'rough', maxSim: 440 });
 window.sim = sim;
 
 const PAINTS = {};
@@ -75,7 +75,7 @@ function wetPatch(x, y, r, water = 0.9) {
 function run(steps) { for (let i = 0; i < steps; i++) sim.step(); }
 function dryOut(maxSteps = 900) {
   const was = sim.params.drySpeed;
-  sim.params.drySpeed = 120;
+  sim.params.drySpeed = 600;
   for (let i = 0; i < maxSteps; i += 15) {
     for (let k = 0; k < 15; k++) sim.step();
     if (!sim.anythingWet()) break;
