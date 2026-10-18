@@ -58,6 +58,25 @@ function dryOut(maxSteps = 900) {
   sim.params.drySpeed = was;
 }
 const stages = [];
+// mass bookkeeping, so a flood can be pinned on the phase that made it
+function total(tex) {
+  const gl = sim.gl;
+  if (!sim._readFbo) sim._readFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sim._readFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  const b = new Float32Array(sim.simW * sim.simH * 4);
+  gl.readPixels(0, 0, sim.simW, sim.simH, gl.RGBA, gl.FLOAT, b);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  let s = 0, mx = 0, n = 0;
+  for (let i = 0; i < b.length; i += 4) { s += b[i]; if (b[i] > mx) mx = b[i]; if (b[i] > 1e-4) n++; }
+  return { s, mx, n };
+}
+const trace = [];
+function mark(label) {
+  const w = total(sim.flow.read), g = total(sim.susp[0].read), d = total(sim.dep[0].read);
+  trace.push(`${label}: water ${w.s.toFixed(1)} (max ${w.mx.toFixed(3)}, cells ${w.n})  pig susp ${g.s.toFixed(0)} dep ${d.s.toFixed(0)} total ${(g.s + d.s).toFixed(0)} (max ${g.mx.toFixed(2)}, cells ${g.n})`);
+}
+window.__trace = trace;
 // the variants: a label and a function that sets params (after a reset to the defaults)
 const VARIANTS = (new URLSearchParams(location.search).get('v') || 'base,edge0,maran0,wick0,smooth35,diff02').split(',');
 const SET = {
@@ -83,16 +102,21 @@ async function paint() {
     (SET[name] || (() => {}))(sim.params);
     const x = (i % cols) * pw + 14, y = Math.floor(i / cols) * ph + 24;
     for (let k = 0; k < 3; k++) { loadBrush('Ultram.', 0.42, 0.85); line(x, y + k * 22, x + pw - 28, y + k * 22, 16); }
+    mark(name + ' washes');
     loadBrush('Pyrrole', 0.8, 0.6);
     line(x, y + 80, x + pw - 28, y + 86, 11, 0.7);
     // and a bloom: a drop of blue into a clear puddle
     wetPatch(x + (pw - 28) / 2, y + 148, 36, 0.95);
     for (let k = 0; k < 20; k++) sim.step();
+    mark(name + ' patch +20');
     loadBrush('Ultram.', 0.8, 0.75);
     sim.splat(x + (pw - 28) / 2 - 10, y + 146, 7, 0.04, BRUSH.pig.map((v) => v * 0.00012), 0.75, 0);
-    for (let k = 0; k < 150; k++) sim.step();
+    for (let k = 0; k < 150; k++) { sim.step(); if (k % 50 === 49) mark(name + ' drop +' + (k + 1)); }
     // each variant must dry under its own physics, so dry now
-    dryOut();
+    const was = sim.params.drySpeed; sim.params.drySpeed = 120;
+    for (let i = 0; i < 900; i += 15) { for (let k = 0; k < 15; k++) sim.step(); if (i % 150 === 135) mark(name + ' drying +' + (i + 15)); if (!sim.anythingWet()) break; }
+    sim.params.drySpeed = was;
+    mark(name + ' dry');
   });
   Object.assign(sim.params, base);
   sim.render();

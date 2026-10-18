@@ -227,11 +227,15 @@ void main() {
   float pb = texture(uPaper, vUV - vec2(0.0, uTexel.y)).x;
   float pt = texture(uPaper, vUV + vec2(0.0, uTexel.y)).x;
 
+  // Only the paper's relief drives the film from here: water drifts into
+  // the valleys of the sheet. The film's own slope — the lubrication flow
+  // that levels a wash — is applied in the transport pass as a face
+  // exchange instead. Done here as a cell velocity from a central
+  // difference it decoupled odd and even cells, and a wash dried with a
+  // fingerprint of ripples through it.
   float ps = uPaperSlope * 0.05;
-  vec2 grad = 0.5 * vec2((fr.x + pr * ps) - (fl.x + pl * ps),
-                         (ft.x + pt * ps) - (fb.x + pb * ps));
-
-  float mob = h / (h + 0.02);
+  vec2 grad = 0.5 * vec2(pr - pl, pt - pb) * ps;
+  float mob = h / (h + 0.02) * min(1.0, 0.04 / max(h, 1e-5));
   vec2 target = -uGrav * grad * mob;
 
   // rim drift: evaporation at the pinned wash edge pulls interior fluid out
@@ -291,6 +295,7 @@ uniform sampler2D uFlow;
 uniform sampler2D uSat;
 ${RP.map((i) => `uniform sampler2D uSusp${i};`).join('\n')}
 uniform float uSmooth;
+uniform float uGrav;
 uniform float uPigDiff;
 uniform float uSaltPush;
 layout(location=0) out vec4 oFlow;
@@ -363,11 +368,24 @@ ${RP.map((i) => `  vec4 n${i} = g${i} - uDt * ((uR > 0.0 ? g${i} * uR : gr${i} *
   // wash, so the pigment moves with it at the giver's concentration; and
   // Brownian diffusion is the same kind of exchange on the pigment alone,
   // only between cells that both carry a film.
+  // The film levels under its own weight and its surface tension: a
+  // diffusion of h, between neighbours, with a coefficient from the depth
+  // (lubrication: deeper flows faster, saturating at 0.04 so the scheme
+  // stays stable) capped at 0.12 per face, which with the advective
+  // outflow keeps a cell from ever giving more than it has. The exchange
+  // is free between wet cells and crosses onto dry paper only from a film
+  // deeper than the contact line's barrier: a juicy stroke creeps a little
+  // wider than its brush, a damp one not at all, and a bloom in a wet
+  // patch runs free.
   float h0 = max(f.x, 1e-5);
   float mobC = smoothstep(0.0005, 0.01, f.x);
   for (int k = 0; k < 4; k++) {
     vec4 fn = k == 0 ? fl : k == 1 ? fr : k == 2 ? fb : ft;
-    float ex = uSmooth * 0.25 * min(f.w, fn.w) * (fn.x - f.x);
+    float hf = max(f.x, fn.x);
+    float mobf = hf / (hf + 0.02) * min(1.0, 0.04 / max(hf, 1e-5));
+    float open = uPin.y <= 0.0 ? 1.0 : mix(smoothstep(uPin.x, uPin.y, hf), 1.0, min(f.w, fn.w));
+    float c = min(0.12, 0.25 * (uSmooth + uGrav * mobf)) * open;
+    float ex = c * (fn.x - f.x);
     float dif = uPigDiff * uDt * 0.25 * min(f.w, fn.w) * min(mobC, smoothstep(0.0005, 0.01, fn.x));
     float cn = ex > 0.0 ? ex / max(fn.x, 1e-5) : ex / h0;
     h += ex;
@@ -424,7 +442,7 @@ void main() {
   // Only a genuine run drinks like this. The gate used to open at a speed
   // the brush's own outward push reaches, so an ordinary stroke's water was
   // drunk within a second or two of landing and wet-in-wet had no open time.
-  float running = uRunAbsorb * uDt * stillDry * smoothstep(0.32, 0.5, speed);
+  float running = uRunAbsorb * uDt * stillDry * smoothstep(0.07, 0.095, speed);
   float absorb = min((uAbsorb * uDt + running) * max(cap - s.x, 0.0), max(h, 0.0));
   s.x += absorb;
   h -= absorb;
@@ -538,6 +556,9 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);\n  vec4 d${i} = texture
 ${RP.map((i) => `  {
     vec4 phE = mix(vec4(ph), vec4(phc), uGrain[${i}]); // per-paint grain scale
     vec4 down = g${i} * clamp((vec4(1.0) - phE * uGamma[${i}]) * uRho[${i}] * dtn * dryBoost, 0.0, 1.0) * wgate;
+    // once the water is gone whatever is still in suspension is on the
+    // paper: it must not stay liftable and mobile on a dry sheet
+    down = mix(down, g${i}, 1.0 - smoothstep(1e-4, 4e-4, h));
     vec4 up = d${i} * clamp((vec4(1.0) + (phE - 1.0) * uGamma[${i}]) / uOmega[${i}] * liftGate, 0.0, 1.0);
     down = min(down, max(vec4(4.0) - d${i}, 0.0));
     up = min(up, max(vec4(4.0) - g${i}, 0.0));

@@ -27,6 +27,8 @@ const QUERY = arg('--query', '');
   await page.waitForFunction(() => window.__ready);
   const t0 = Date.now();
   const stages = await page.evaluate(() => window.__scenes());
+  const trace = await page.evaluate(() => window.__trace || []);
+  for (const t of trace) console.log('  ' + t);
   stages.forEach((s, i) => {
     const f = path.join(OUT, `${PAGE}-${i}-${s.label.replace(/[^a-z0-9]+/gi, '-')}.png`);
     fs.writeFileSync(f, Buffer.from(s.png.split(',')[1], 'base64'));

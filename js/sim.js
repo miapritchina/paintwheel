@@ -69,11 +69,20 @@ class WatercolorSim {
       maran: 2.2,       // Marangoni strength: blooms in wet washes
       tilt: [0, 0],     // gravity vector from device tilt
       edgeFlow: 0.03,   // outward drift at wash rim (contact line ~pinned)
-      maxSpeed: 0.6,    // CFL guard, cells/step
+      // CFL guard, cells per substep. A cell can lose water through all
+      // four faces at once and through the levelling exchange (0.3), so
+      // the face speed has to stay under about 0.17 for the outflow never
+      // to exceed what is there; 0.6 let it, and the clamp at zero then
+      // created water and pigment out of nothing.
+      maxSpeed: 0.1,
       // the contact line: a face into dry paper opens as the film deepens
       // from pinLo to pinHi (pinHi 0 = no pinning)
-      pinLo: 0.012,
-      pinHi: 0.03,
+      // A dab of a wet brush leaves about 0.04, so an ordinary stroke keeps
+      // its edge; only a flooded passage (overlapping wet strokes, a
+      // puddle) creeps outward. At 0.012-0.03 every stroke spread until its
+      // film thinned, and every edge went soft.
+      pinLo: 0.035,
+      pinHi: 0.07,
       // Surface tension levelling the film. 0.04 let a fifty-texel patch
       // stay thicker than its neighbour for the whole drying time, and the
       // thinner patch dried first, as a front with the rim's evaporation.
@@ -970,7 +979,9 @@ class WatercolorSim {
       gl.uniform4f(p.uniforms[`uPig${i}`], pig[i * 4], pig[i * 4 + 1], pig[i * 4 + 2], pig[i * 4 + 3]);
     }
     gl.uniform1f(p.uniforms.uWetness, wetness);
-    gl.uniform1f(p.uniforms.uPush, Math.min(0.6, water * 8.0));
+    // the shove a dab gives the wet film around it, in face speed; it used
+    // to be set against a cap of 0.6 and would now pin every dab at the cap
+    gl.uniform1f(p.uniforms.uPush, Math.min(0.08, water * 1.2));
     gl.uniform1f(p.uniforms.uScrub, scrub);
     this._drawRegion(box);
     this._copyBackRegion(targets, box);
@@ -1037,6 +1048,7 @@ class WatercolorSim {
       this._bindOutputs([this.flow.write, ...this.susp.map((pr) => pr.write)]);
       p = this._use('height', [['uFlow', this.flow.read], ['uSat', this.sat.read], ...this._suspInputs()]);
       gl.uniform1f(p.uniforms.uSmooth, P.smooth);
+      gl.uniform1f(p.uniforms.uGrav, P.grav);
       gl.uniform1f(p.uniforms.uPigDiff, P.pigDiff);
       gl.uniform1f(p.uniforms.uSaltPush, P.saltPush);
       gl.uniform2f(p.uniforms.uPin, P.pinLo, P.pinHi);

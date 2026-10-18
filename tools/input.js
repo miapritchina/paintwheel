@@ -80,6 +80,9 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
         PARTS.fill(0); PARTS[0] = 1; brush.setRecipe(PARTS, brush.PIG_CAP * 0.8); brush.water = 0.5; window.__uv();
       },
       steps(n) { for (let i = 0; i < n; i++) sim.step(); },
+      // the paint takes its time to settle now; a check that reads the
+      // deposits has to let the sheet dry first
+      settle() { const was = sim.params.drySpeed; sim.params.drySpeed = 120; for (let i = 0; i < 160; i++) sim.step(); sim.params.drySpeed = was; },
     };
   });
 
@@ -88,7 +91,7 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
     T.load();
     T.ev('pointerdown', { clientX: 300, clientY: 300, pressure: 0.6 });
     T.ev('pointerup', { clientX: 300, clientY: 300, pressure: 0, buttons: 0 });
-    T.steps(6);
+    T.settle();
     const b = T.depBox();
     const sx = b.w / sim.sheetW;
     return { ...b, cx: 300 * sx, cy: (sim.sheetH - 300) * sx, size: Number(document.getElementById('size').value) * sx };
@@ -111,7 +114,7 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
     for (let i = 0; i < 10; i++) {
       T.load();
       T.stroke(100 + i * 60, 150, 140 + i * 60, 450, { pressure: 0.6 });
-      T.steps(3);
+      T.settle();
       sums.push(T.depSum());
     }
     const count = sim.undoCount, bytes = sim.undoBytes;
@@ -167,13 +170,13 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
     T.load();
     T.ev('pointerdown', { clientX: 500, clientY: 300, pressure: 0.6, altitudeAngle: Math.PI / 2, azimuthAngle: 0 });
     T.ev('pointerup', { clientX: 500, clientY: 300, pressure: 0, buttons: 0 });
-    T.steps(4);
+    T.settle();
     const round = T.depBox();
     sim.clearAll();
     T.load();
     T.ev('pointerdown', { clientX: 500, clientY: 300, pressure: 0.6, altitudeAngle: 0.25, azimuthAngle: 0 });
     T.ev('pointerup', { clientX: 500, clientY: 300, pressure: 0, buttons: 0 });
-    T.steps(4);
+    T.settle();
     const flat = T.depBox();
     const ev = LOGBOOK.export().events.filter((e) => e.t === 'splat' && e.sh);
     return { rw: round.x1 - round.x0, rh: round.y1 - round.y0, fw: flat.x1 - flat.x0, fh: flat.y1 - flat.y0, logged: ev.length };
@@ -210,7 +213,7 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
     T.load();
     T.ev('pointerdown', { clientX: 512, clientY: 384, pressure: 0.6 }); // screen centre -> sheet (300, 250)
     T.ev('pointerup', { clientX: 512, clientY: 384, pressure: 0, buttons: 0 });
-    T.steps(4);
+    T.settle();
     const b = T.depBox();
     const sx = b.w / sim.sheetW;
     const cx = (b.x0 + b.x1) / 2 / sx, cy = sim.sheetH - (b.y0 + b.y1) / 2 / sx;
@@ -235,7 +238,7 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
     sim.clearAll(); sim.clearUndo(); sim.fitView();
     T.load();
     T.stroke(200, 200, 800, 500, { pressure: 0.7 });
-    T.steps(3);
+    T.settle();
     return { before: T.depSum(), sheet: [sim.sheetW, sim.sheetH], sim: [sim.simW, sim.simH] };
   });
   await page.setViewportSize({ width: 768, height: 1024 });
@@ -292,7 +295,7 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
     ev('pointerdown', { clientX: 300, clientY: 300 });
     ev('pointermove', { clientX: 400, clientY: 320 });
     ev('pointerup', { clientX: 400, clientY: 320, buttons: 0 });
-    for (let i = 0; i < 3; i++) sim.step();
+    const was = sim.params.drySpeed; sim.params.drySpeed = 120; for (let i = 0; i < 160; i++) sim.step(); sim.params.drySpeed = was;
     const snap = sim.readDeposits();
     let s = 0; for (const q of snap.layers) for (let i = 0; i < q.length; i++) s += q[i];
     return { dep: s, penSeen: window.__input.penSeen };
