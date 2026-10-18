@@ -6,10 +6,10 @@
 
 // Paper presets: procedural texture + absorbency + base color + flow feel.
 const PAPERS = {
-  coldpress: { label: 'Cold press', grain: 0.55, tooth: 0.35, fiber: 0.10, capBase: 0.55, capVar: 0.45, color: [0.94, 0.92, 0.87], paperSlope: 0.5 },
-  hotpress:  { label: 'Hot press',  grain: 0.22, tooth: 0.08, fiber: 0.05, capBase: 0.50, capVar: 0.22, color: [0.95, 0.94, 0.90], paperSlope: 0.2 },
-  rough:     { label: 'Rough',      grain: 0.72, tooth: 0.55, fiber: 0.12, capBase: 0.60, capVar: 0.50, color: [0.93, 0.91, 0.85], paperSlope: 0.7 },
-  toned:     { label: 'Toned cream',grain: 0.50, tooth: 0.30, fiber: 0.10, capBase: 0.55, capVar: 0.40, color: [0.90, 0.85, 0.72], paperSlope: 0.5 },
+  coldpress: { label: 'Cold press', grain: 0.55, tooth: 0.35, fiber: 0.10, capBase: 0.55, capVar: 0.22, color: [0.94, 0.92, 0.87], paperSlope: 0.5 },
+  hotpress:  { label: 'Hot press',  grain: 0.22, tooth: 0.08, fiber: 0.05, capBase: 0.50, capVar: 0.10, color: [0.95, 0.94, 0.90], paperSlope: 0.2 },
+  rough:     { label: 'Rough',      grain: 0.72, tooth: 0.55, fiber: 0.12, capBase: 0.60, capVar: 0.25, color: [0.93, 0.91, 0.85], paperSlope: 0.7 },
+  toned:     { label: 'Toned cream',grain: 0.50, tooth: 0.30, fiber: 0.10, capBase: 0.55, capVar: 0.20, color: [0.90, 0.85, 0.72], paperSlope: 0.5 },
   // the mixing plate: no tooth, no absorbency, but a steep relief so the
   // well rims actually contain the liquid
   ceramic:   { label: 'Ceramic',    grain: 0.03, tooth: 0.0,  fiber: 0.02, capBase: 0.0,  capVar: 0.0,  color: [0.97, 0.97, 0.96], paperSlope: 25.0 },
@@ -36,7 +36,18 @@ class WatercolorSim {
 
     const extF = gl.getExtension('EXT_color_buffer_float');
     const extHF = gl.getExtension('EXT_color_buffer_half_float');
+    const extLin = gl.getExtension('OES_texture_float_linear');
     if (!extF && !extHF) throw new Error('Floating-point render targets are not supported.');
+    // The state lives in FULL floats where the GPU allows it. Half floats
+    // resolve about one part in a thousand, and most of what happens to a
+    // wash per substep is smaller than that: a slow settling takes 0.06% of
+    // the suspended pigment, a slow evaporation a few hundredths of a
+    // percent of the film. In half floats "suspended minus that" rounds back
+    // to the same number while "deposit plus that" is representable — so
+    // every substep invented pigment (measured: +40% over one stroke) and
+    // settling itself stalled. The drying code had hit the same floor and
+    // been pulsed around it; the clean answer is the extra 16 bits.
+    this.texFormat = extF && extLin ? gl.RGBA32F : gl.RGBA16F;
     const maxAttach = gl.getParameter(gl.MAX_COLOR_ATTACHMENTS);
     if (maxAttach < PIG_TEXTURES + 1) {
       throw new Error(`This device supports only ${maxAttach} MRT attachments; ${PIG_TEXTURES + 1} needed.`);
@@ -48,7 +59,10 @@ class WatercolorSim {
       dt: 1.0,
       grav: 6.0,        // water-surface slope pull (lubrication mobility)
       paperSlope: 0.5,  // paper relief influence on flow
-      inertia: 0.8,     // velocity memory: lets drop impulses ripple outward
+      // Velocity memory: lets drop impulses ripple outward. 0.8 made the
+      // film ring like a struck bell — standing ripples across every wash
+      // once the water lasted long enough to show them.
+      inertia: 0.4,
       // Marangoni strength. Measured on a lightly-wetted sheet, a drop of
       // colour reaches 2247 cells at 1.0, 3937 at 2.0 and 5864 at 3.5; at
       // 1.0 wet-on-wet barely reacted, which is not what a wet sheet does.
@@ -56,7 +70,16 @@ class WatercolorSim {
       tilt: [0, 0],     // gravity vector from device tilt
       edgeFlow: 0.03,   // outward drift at wash rim (contact line ~pinned)
       maxSpeed: 0.6,    // CFL guard, cells/step
-      smooth: 0.04,     // height diffusion / surface tension stand-in
+      // the contact line: a face into dry paper opens as the film deepens
+      // from pinLo to pinHi (pinHi 0 = no pinning)
+      pinLo: 0.012,
+      pinHi: 0.03,
+      // Surface tension levelling the film. 0.04 let a fifty-texel patch
+      // stay thicker than its neighbour for the whole drying time, and the
+      // thinner patch dried first, as a front with the rim's evaporation.
+      // At 0.3 the film is level across a wash well before it dries, and
+      // the levelling carries pigment with it (see advect).
+      smooth: 0.3,
       // Drying budget, applied in PULSES (see dryPulse). The state textures
       // are RGBA16F, so a per-substep decrement smaller than ~0.05% of the
       // stored value rounds away to nothing — which silently froze drying
@@ -64,11 +87,19 @@ class WatercolorSim {
       // the same total loss once every `dryPulse` substeps keeps every
       // decrement comfortably above the precision floor.
       dryPulse: 16,     // substeps between drying updates
-      evap: 0.0000037,  // bulk evaporation (per substep, scaled by dryPulse)
-      edgeEvap: 20.0,   // extra rim evaporation multiplier (edge darkening)
-      absorb: 0.000012, // absorption into the sheet
+      // Open time. Measured on one stroke at these rates: the water's
+      // half-life is ~600 steps (ten seconds at 60 fps, twenty at the
+      // drying slider's default), and the sheet is dry in about four
+      // half-lives. The old rates dried the same stroke in 275 steps —
+      // under five seconds — which is why wet-in-wet never had time.
+      evap: 0.0000005,  // bulk evaporation (per substep, scaled by dryPulse)
+      // Extra rim evaporation (edge darkening). 20x drank the rim so fast
+      // that the levelling, now that it carries pigment, fed the whole
+      // wash's colour into the edge; a ring is a share, not the lot.
+      edgeEvap: 5.0,
+      absorb: 0.0000016, // absorption into the sheet
       runAbsorb: 0.0025, // extra imbibition under moving water on dry paper
-      satEvap: 0.0000015, // the damp sheet drying out: must be well under
+      satEvap: 0.0000002, // the damp sheet drying out: must be well under
                           // `absorb`, or the paper can never become damp
                           // and there is no damp stage and no backruns
       dryScale: 1.0,    // user drying-speed control
@@ -76,8 +107,14 @@ class WatercolorSim {
       wick: 0.15,       // capillary diffusion rate
       wickThresh: 0.18,
       backrun: 0.35,    // fraction of fiber capacity that re-wets a wash
-      pigDiff: 0.12,    // Brownian pigment diffusion in free water
-      settle: 0.08,     // global time scale on Curtis deposition rates
+      // Brownian pigment diffusion. 0.12 blurred every bloom into a soft
+      // gaussian; a real bloom is carried, not diffused, and its edge is
+      // fingers. Most of the mixing now rides the levelling flow instead.
+      pigDiff: 0.05,
+      // Global time scale on Curtis deposition rates. Pigment stays mobile
+      // while the wash is wet: half of a stroke's load settles in ~400
+      // steps, the rest as the film thins (dryBoost in transfer).
+      settle: 0.012,
       lift: 0.012,      // resolubility: rewet-lift rate per step
       saltPush: 6.0,    // salt starburst pigment repulsion (texels)
       saltSpacing: 9.0, // mean spacing between grains (sim texels)
@@ -145,7 +182,7 @@ class WatercolorSim {
 
   _initPrograms() {
     this.progs = {};
-    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'advect', 'transferSusp', 'transferDep', 'render', 'salt', 'probe', 'diff', 'clear', 'copy']) {
+    for (const name of ['paper', 'splat', 'velocity', 'height', 'moisture', 'capillary', 'transferSusp', 'transferDep', 'render', 'salt', 'probe', 'diff', 'clear', 'copy']) {
       this.progs[name] = this._program(name, SHADERS[name]);
     }
   }
@@ -154,7 +191,7 @@ class WatercolorSim {
     const gl = this.gl;
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA16F, w, h);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, this.texFormat, w, h);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -652,6 +689,7 @@ class WatercolorSim {
           const ty = gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE);
           this._readType = ty === gl.HALF_FLOAT ? gl.HALF_FLOAT : gl.FLOAT;
         }
+        if (this.texFormat === gl.RGBA32F) this._readType = gl.FLOAT; // the only type a 32F texture takes back
         const n = box.w * box.h * 4;
         const buf = this._readType === gl.HALF_FLOAT ? new Uint16Array(n) : new Float32Array(n);
         gl.readPixels(box.x, box.y, box.w, box.h, gl.RGBA, this._readType, buf);
@@ -995,12 +1033,16 @@ class WatercolorSim {
       this._draw();
       this.flow.swap();
 
-      // 2. height / continuity
-      this._bindOutputs([this.flow.write]);
-      p = this._use('height', [['uFlow', this.flow.read]]);
+      // 2. transport: water continuity and the pigment riding it
+      this._bindOutputs([this.flow.write, ...this.susp.map((pr) => pr.write)]);
+      p = this._use('height', [['uFlow', this.flow.read], ['uSat', this.sat.read], ...this._suspInputs()]);
       gl.uniform1f(p.uniforms.uSmooth, P.smooth);
+      gl.uniform1f(p.uniforms.uPigDiff, P.pigDiff);
+      gl.uniform1f(p.uniforms.uSaltPush, P.saltPush);
+      gl.uniform2f(p.uniforms.uPin, P.pinLo, P.pinHi);
       this._draw();
       this.flow.swap();
+      this.susp.forEach((pr) => pr.swap());
 
       // 3. moisture: evaporation + absorption
       this._bindOutputs([this.flow.write, this.sat.write]);
@@ -1029,14 +1071,6 @@ class WatercolorSim {
       this._draw();
       this.flow.swap();
       this.sat.swap();
-
-      // 5. pigment advection + diffusion (+ salt starburst repulsion)
-      this._bindOutputs(this.susp.map((pr) => pr.write));
-      p = this._use('advect', [['uFlow', this.flow.read], ['uSat', this.sat.read], ...this._suspInputs()]);
-      gl.uniform1f(p.uniforms.uPigDiff, P.pigDiff);
-      gl.uniform1f(p.uniforms.uSaltPush, P.saltPush);
-      this._draw();
-      this.susp.forEach((pr) => pr.swap());
 
       // 6. deposition / lifting: two draws over the same pre-pass state
       // (suspension update, then deposit update), swap everything after.

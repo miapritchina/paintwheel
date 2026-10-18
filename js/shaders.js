@@ -3,13 +3,13 @@
 // Pipeline per frame (all fragment-shader passes over the sim grid):
 //   1. velocity  - thin-film (lubrication) flow: water-surface slope + paper
 //                  relief, Marangoni bloom term, tilt gravity, rim drift
-//   2. height    - continuity: conservative upwind fluxes of h*vel
+//   2. height    - continuity: conservative upwind fluxes of h*vel, and the
+//                  suspended pigment riding the same fluxes; levelling
 //   3. moisture  - evaporation (boosted at wash edges -> edge darkening),
 //                  absorption into the capillary layer of the paper
 //   4. capillary - fiber wicking; damp cells re-wetted by an advancing wet
 //                  front rejoin the wet mask (backruns)
-//   5. advect    - semi-Lagrangian transport + diffusion of suspended pigment
-//   6. transfer  - pigment deposition onto / lifting off the paper, with
+//   5. transfer  - pigment deposition onto / lifting off the paper, with
 //                  per-pigment density, staining and granulation
 //   7. render    - Kubelka-Munk optical compositing of 16 pigment channels
 //                  over textured paper, plus wet-sheen shading
@@ -83,6 +83,12 @@ float fbm(vec2 p) {
   }
   return v;
 }
+// noise stretched along one direction: a field of fibres lying that way
+float lane(vec2 p, float ang) {
+  vec2 d = vec2(cos(ang), sin(ang));
+  vec2 n = vec2(-d.y, d.x);
+  return vnoise(vec2(dot(p, d) * 0.07, dot(p, n) * 0.75) + ang * 9.1);
+}
 void main() {
   vec2 p = vUV / uTexel;
   float grain = fbm(p * 0.045);
@@ -104,8 +110,14 @@ void main() {
                     smoothstep(0.38, 0.5, abs(vUV.y - 0.5)));
     height = mix(height * 0.2, 1.0, rim);
   }
-  float capacity = uCapBase + uCapVar * fbm(p * 0.02 + 91.7);
-  float fibers = vnoise(p * 0.6 + 3.1);
+  // Sizing varies a little and finely. It used to vary by half the base
+  // over fifty-texel patches, so one part of a wash drank its water well
+  // before the next: internal drying fronts, each with the rim's boosted
+  // evaporation, and the wash dried as clouds.
+  float capacity = uCapBase + uCapVar * (0.4 * fbm(p * 0.02 + 91.7) + 0.6 * fbm(p * 0.12 + 17.3));
+  // Fibres are lanes, not speckle: long thin runs of easier flow in a few
+  // directions, which is what breaks an advancing bloom into fingers.
+  float fibers = clamp(0.5 + 1.5 * ((lane(p, 0.35) + lane(p, 1.75) + lane(p, 2.95)) / 3.0 - 0.5), 0.0, 1.0);
   // w: the coarse structure alone — coarse-grained pigments (high grain
   // parameter) settle by this field, fine ones by the full tooth in x
   float coarse = clamp(0.5 + uGrainAmp * (grain - 0.5) * 1.6, 0.0, 1.0);
@@ -155,7 +167,7 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);`).join('\n')}
   // and worth keeping, but it belongs to a genuinely dry brush, not to two
   // thirds of the slider.
   m *= mix(contact, 1.0, smoothstep(0.30, 0.55, uWetness));
-  m *= 0.75 + 0.5 * pap.z;
+  m *= 0.85 + 0.3 * pap.z;
 
   // uPig is a peak optical depth, already worked out on the CPU so that this
   // dab lays exactly the mass the brush gave up (see js/brush.js — the
@@ -229,7 +241,7 @@ void main() {
   // Marangoni flow: paint lowers surface tension, so fluid is pulled from
   // painted regions toward clean water (log-concentration per the Gibbs
   // isotherm) — this drives wet-on-wet blooms. Fibers modulate -> feathering.
-  float fiber = 0.6 + 0.8 * texture(uPaper, vUV).z;
+  float fiber = 0.3 + 1.4 * texture(uPaper, vUV).z;
   float pc = pigTotal(vUV);
   vec2 gp = 0.5 * vec2(pigTotal(vUV + vec2(uTexel.x, 0.0)) - pigTotal(vUV - vec2(uTexel.x, 0.0)),
                        pigTotal(vUV + vec2(0.0, uTexel.y)) - pigTotal(vUV - vec2(0.0, uTexel.y)));
@@ -237,7 +249,15 @@ void main() {
   // but a brush dab lays down 0.01..0.05, so for ordinary painting this term
   // was switched off and colour dropped into a wet wash hardly moved. It has
   // to open where the water a brush actually leaves lives.
-  target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.003, 0.018, h);
+  //
+  // And it needs a film to flow IN. At the rim of a stroke on dry paper the
+  // pigment gradient is steepest of all, and the term was shoving fluid off
+  // the stroke onto the dry sheet, where it crept out along the fibre noise
+  // as a fringe of hairs on every edge. Surface-tension flow happens on a
+  // surface: it is gated on every neighbour being wet, which a bloom inside
+  // a wash satisfies and a contact line never does.
+  float wmin = min(min(fl.w, fr.w), min(fb.w, ft.w));
+  target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.003, 0.018, h) * wmin;
 
   // device tilt: only a genuinely wet film runs (drips), damp washes hold;
   // fiber modulation breaks the advancing front into fingers
@@ -253,43 +273,112 @@ void main() {
 }`;
 
 // --------------------------------------------------------------- height ----
+// Transport of water AND pigment, in one conservative pass. MRT: flow,
+// susp0..N-1.
+//
+// It used to be two passes: continuity for the water here, and a
+// semi-Lagrangian resample of the pigment in `advect`. A resample is not
+// conservative — in the outward flow at a wash rim it stretched pigment into
+// being (measured: +60% over one stroke's drying) — and the surface-tension
+// levelling moved water while leaving pigment where it was, so every overlap
+// of two wet strokes dried as a band of double strength. Now the pigment
+// rides the same face fluxes as the water, at the upwind cell's
+// concentration, and the levelling exchange carries pigment at the giving
+// cell's concentration. Pigment moves exactly as the wash does.
 SHADERS.height = `#version 300 es
 ${COMMON}
 uniform sampler2D uFlow;
+uniform sampler2D uSat;
+${RP.map((i) => `uniform sampler2D uSusp${i};`).join('\n')}
 uniform float uSmooth;
-out vec4 frag;
+uniform float uPigDiff;
+uniform float uSaltPush;
+layout(location=0) out vec4 oFlow;
+${RP.map((i) => `layout(location=${i + 1}) out vec4 oSusp${i};`).join('\n')}
+
+// how much of a face flux gets through: all of it into a wet cell, and into
+// a dry one only what a film deeper than the capillary barrier can send
+uniform vec2 uPin; // film depth at which a face into dry paper opens: from, to
+float pin(float hUpwind, float wDest) {
+  if (uPin.y <= 0.0) return 1.0;
+  return mix(smoothstep(uPin.x, uPin.y, hUpwind), 1.0, clamp(wDest, 0.0, 1.0));
+}
 
 void main() {
   vec4 f = texture(uFlow, vUV);
-  vec4 fl = texture(uFlow, vUV - vec2(uTexel.x, 0.0));
-  vec4 fr = texture(uFlow, vUV + vec2(uTexel.x, 0.0));
-  vec4 fb = texture(uFlow, vUV - vec2(0.0, uTexel.y));
-  vec4 ft = texture(uFlow, vUV + vec2(0.0, uTexel.y));
+  vec2 oR = vec2(uTexel.x, 0.0), oT = vec2(0.0, uTexel.y);
+  vec4 fl = texture(uFlow, vUV - oR);
+  vec4 fr = texture(uFlow, vUV + oR);
+  vec4 fb = texture(uFlow, vUV - oT);
+  vec4 ft = texture(uFlow, vUV + oT);
 
-  // continuity dh/dt = -div(h*vel), conservative upwind face fluxes
+  // salt: a dissolving grain draws water toward itself and shoves pigment
+  // outward, leaving the pale starburst. Active only while the wash is in
+  // the damp band — too wet and the salt just dissolves, too dry and it
+  // merely sits on the surface (like real salt timing). A local shift of the
+  // pigment field: the one place a resample is still used.
+  vec2 here = vUV;
+  if (uSaltPush > 0.0) {
+    vec2 e2 = uTexel * 2.0;
+    vec2 gs = 0.5 * vec2(texture(uSat, vUV + vec2(e2.x, 0.0)).z - texture(uSat, vUV - vec2(e2.x, 0.0)).z,
+                         texture(uSat, vUV + vec2(0.0, e2.y)).z - texture(uSat, vUV - vec2(0.0, e2.y)).z);
+    float dampBand = smoothstep(0.0004, 0.003, f.x) * (1.0 - smoothstep(0.05, 0.15, f.x));
+    here += gs * uSaltPush * uTexel * dampBand;
+  }
+${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, here);
+  vec4 gl${i} = texture(uSusp${i}, vUV - oR);
+  vec4 gr${i} = texture(uSusp${i}, vUV + oR);
+  vec4 gb${i} = texture(uSusp${i}, vUV - oT);
+  vec4 gt${i} = texture(uSusp${i}, vUV + oT);`).join('\n')}
+
+  // continuity dh/dt = -div(h*vel), conservative upwind face fluxes; the
+  // pigment takes the same faces at the upwind cell's concentration, which
+  // is the same thing as the upwind cell's pigment times the face velocity
   float uR = 0.5 * (f.y + fr.y);
   float uL = 0.5 * (f.y + fl.y);
   float vT = 0.5 * (f.z + ft.z);
   float vB = 0.5 * (f.z + fb.z);
-  float fluxR = uR > 0.0 ? f.x * uR : fr.x * uR;
-  float fluxL = uL > 0.0 ? fl.x * uL : f.x * uL;
-  float fluxT = vT > 0.0 ? f.x * vT : ft.x * vT;
-  float fluxB = vB > 0.0 ? fb.x * vB : f.x * vB;
+  // The contact line is pinned. Water does not run off a stroke onto dry
+  // paper unless the film is thick enough to push over the sheet's
+  // capillary barrier: a face into a dry cell passes only what a deep film
+  // sends. Without this a stroke kept spreading for as long as it stayed
+  // wet, and every edge went soft. Inside the wet mask flow is free.
+  float kR = uR > 0.0 ? pin(f.x, fr.w) : pin(fr.x, f.w);
+  float kL = uL > 0.0 ? pin(fl.x, f.w) : pin(f.x, fl.w);
+  float kT = vT > 0.0 ? pin(f.x, ft.w) : pin(ft.x, f.w);
+  float kB = vB > 0.0 ? pin(fb.x, f.w) : pin(f.x, fb.w);
+  float fluxR = (uR > 0.0 ? f.x * uR : fr.x * uR) * kR;
+  float fluxL = (uL > 0.0 ? fl.x * uL : f.x * uL) * kL;
+  float fluxT = (vT > 0.0 ? f.x * vT : ft.x * vT) * kT;
+  float fluxB = (vB > 0.0 ? fb.x * vB : f.x * vB) * kB;
   float h = f.x - uDt * (fluxR - fluxL + fluxT - fluxB);
+${RP.map((i) => `  vec4 n${i} = g${i} - uDt * ((uR > 0.0 ? g${i} * uR : gr${i} * uR) * kR - (uL > 0.0 ? gl${i} * uL : g${i} * uL) * kL
+                      + (vT > 0.0 ? g${i} * vT : gt${i} * vT) * kT - (vB > 0.0 ? gb${i} * vB : g${i} * vB) * kB);`).join('\n')}
 
   // Surface tension levelling the film. Written as a PAIRWISE exchange —
   // the coefficient min(w_a, w_b) is symmetric, so whatever one cell gives
   // the other receives. (The earlier mix(h, avg) form was asymmetric at the
   // wash edge: it invented water there, and a wash would reach equilibrium
-  // with evaporation and never finish drying.)
-  float lap = 0.0;
-  lap += min(f.w, fl.w) * (fl.x - f.x);
-  lap += min(f.w, fr.w) * (fr.x - f.x);
-  lap += min(f.w, fb.w) * (fb.x - f.x);
-  lap += min(f.w, ft.w) * (ft.x - f.x);
-  h += uSmooth * 0.25 * lap;
+  // with evaporation and never finish drying.) The water that moves is the
+  // wash, so the pigment moves with it at the giver's concentration; and
+  // Brownian diffusion is the same kind of exchange on the pigment alone,
+  // only between cells that both carry a film.
+  float h0 = max(f.x, 1e-5);
+  float mobC = smoothstep(0.0005, 0.01, f.x);
+  for (int k = 0; k < 4; k++) {
+    vec4 fn = k == 0 ? fl : k == 1 ? fr : k == 2 ? fb : ft;
+    float ex = uSmooth * 0.25 * min(f.w, fn.w) * (fn.x - f.x);
+    float dif = uPigDiff * uDt * 0.25 * min(f.w, fn.w) * min(mobC, smoothstep(0.0005, 0.01, fn.x));
+    float cn = ex > 0.0 ? ex / max(fn.x, 1e-5) : ex / h0;
+    h += ex;
+${RP.map((i) => `    {
+      vec4 gn = k == 0 ? gl${i} : k == 1 ? gr${i} : k == 2 ? gb${i} : gt${i};
+      n${i} += (ex > 0.0 ? gn : g${i}) * cn + dif * (gn - g${i});
+    }`).join('\n')}
+  }
 
-  frag = vec4(max(h, 0.0), f.yz, f.w);
+  oFlow = vec4(max(h, 0.0), f.yz, f.w);
+${RP.map((i) => `  oSusp${i} = max(n${i}, vec4(0.0));`).join('\n')}
 }`;
 
 // ------------------------------------------------------------- moisture ----
@@ -332,7 +421,10 @@ void main() {
   // evaporation, and must not scale with the drying slider.
   float speed = length(f.yz);
   float stillDry = 1.0 - smoothstep(0.0, 0.6, s.x / max(cap, 1e-4));
-  float running = uRunAbsorb * uDt * stillDry * smoothstep(0.02, 0.25, speed);
+  // Only a genuine run drinks like this. The gate used to open at a speed
+  // the brush's own outward push reaches, so an ordinary stroke's water was
+  // drunk within a second or two of landing and wet-in-wet had no open time.
+  float running = uRunAbsorb * uDt * stillDry * smoothstep(0.32, 0.5, speed);
   float absorb = min((uAbsorb * uDt + running) * max(cap - s.x, 0.0), max(h, 0.0));
   s.x += absorb;
   h -= absorb;
@@ -408,48 +500,6 @@ void main() {
   oSat = s;
 }`;
 
-// --------------------------------------------------------------- advect ----
-SHADERS.advect = `#version 300 es
-${COMMON}
-uniform sampler2D uFlow;
-uniform sampler2D uSat;
-${RP.map((i) => `uniform sampler2D uSusp${i};`).join('\n')}
-uniform float uPigDiff;
-uniform float uSaltPush;
-${RP.map((i) => `layout(location=${i}) out vec4 oSusp${i};`).join('\n')}
-
-void main() {
-  vec4 f = texture(uFlow, vUV);
-  vec2 back = vUV - f.yz * uDt * uTexel;
-
-  // salt: a dissolving grain draws water toward itself and shoves pigment
-  // outward, leaving the pale starburst. Active only while the wash is in
-  // the damp band — too wet and the salt just dissolves, too dry and it
-  // merely sits on the surface (like real salt timing).
-  if (uSaltPush > 0.0) {
-    vec2 e2 = uTexel * 2.0;
-    vec2 gs = 0.5 * vec2(texture(uSat, vUV + vec2(e2.x, 0.0)).z - texture(uSat, vUV - vec2(e2.x, 0.0)).z,
-                         texture(uSat, vUV + vec2(0.0, e2.y)).z - texture(uSat, vUV - vec2(0.0, e2.y)).z);
-    float dampBand = smoothstep(0.0004, 0.003, f.x) * (1.0 - smoothstep(0.05, 0.15, f.x));
-    back += gs * uSaltPush * uTexel * dampBand;
-  }
-${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, back);`).join('\n')}
-
-  float mob = f.w * smoothstep(0.0005, 0.01, f.x);
-  if (mob > 0.0) {
-${RP.map((i) => `    vec4 avg${i} = vec4(0.0);`).join('\n')}
-    for (int k = 0; k < 4; k++) {
-      vec2 off = k == 0 ? vec2(uTexel.x, 0.0) : k == 1 ? vec2(-uTexel.x, 0.0)
-               : k == 2 ? vec2(0.0, uTexel.y) : vec2(0.0, -uTexel.y);
-      float wn = texture(uFlow, vUV + off).w;
-${RP.map((i) => `      avg${i} += mix(g${i}, texture(uSusp${i}, vUV + off), wn);`).join('\n')}
-    }
-    float blend = uPigDiff * uDt * mob;
-${RP.map((i) => `    g${i} = mix(g${i}, avg${i} * 0.25, blend);`).join('\n')}
-  }
-${RP.map((i) => `  oSusp${i} = g${i};`).join('\n')}
-}`;
-
 // ------------------------------------------------------------- transfer ----
 // Deposition / lifting between suspension and paper (Curtis et al. 1997 §4.5,
 // with rewetting on its own resolubility timescale). Split into two draws
@@ -489,8 +539,8 @@ ${RP.map((i) => `  {
     vec4 phE = mix(vec4(ph), vec4(phc), uGrain[${i}]); // per-paint grain scale
     vec4 down = g${i} * clamp((vec4(1.0) - phE * uGamma[${i}]) * uRho[${i}] * dtn * dryBoost, 0.0, 1.0) * wgate;
     vec4 up = d${i} * clamp((vec4(1.0) + (phE - 1.0) * uGamma[${i}]) / uOmega[${i}] * liftGate, 0.0, 1.0);
-    down = min(down, max(vec4(1.0) - d${i}, 0.0));
-    up = min(up, max(vec4(1.0) - g${i}, 0.0));
+    down = min(down, max(vec4(4.0) - d${i}, 0.0));
+    up = min(up, max(vec4(4.0) - g${i}, 0.0));
     o${i} = ${outs === 'susp' ? `g${i} - down + up` : `d${i} + down - up`};
   }`).join('\n')}
 }`;

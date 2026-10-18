@@ -287,6 +287,9 @@ async function paintSheet() {
     // Long enough to lose its shine: a backrun needs the wash to be damp and
     // setting, not still swimming. 700 steps left it wet and the drop simply
     // merged in, which measured as "no backrun" when it was really "too soon".
+    // the sheet now dries about five times slower than when this wait was
+    // set; the drying dial, not a longer wait, keeps the sheet affordable
+    sim.params.dryScale = 5;
     run(1600);
     const before = (grab(), stats(180, y - 26, 130, 52));
     BRUSH.pig.fill(0);
@@ -298,6 +301,7 @@ async function paintSheet() {
     // drying at 120x gave the bloom no chance to form and then measured its
     // absence, which is a stopwatch fault rather than a physics one.
     run(900);
+    sim.params.dryScale = 1;
     dryOut();
     grab();
     const after = stats(180, y - 26, 130, 52);

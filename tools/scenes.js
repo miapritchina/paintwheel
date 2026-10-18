@@ -1,6 +1,6 @@
 // Render test/scenes.html and write its stages as PNGs, to be looked at.
 //
-//   node tools/scenes.js [--port 8779] [--out dir]
+//   node tools/scenes.js [--port 8779] [--out dir] [--page scenes|variants] [--query v=a,b]
 //
 // Needs a static server on the repo root, as tools/tells.js does.
 'use strict';
@@ -10,6 +10,8 @@ const path = require('path');
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const PORT = arg('--port', '8779');
 const OUT = arg('--out', '.');
+const PAGE = arg('--page', 'scenes');
+const QUERY = arg('--query', '');
 
 (async () => {
   const browser = await chromium.launch({
@@ -21,12 +23,12 @@ const OUT = arg('--out', '.');
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-  await page.goto(`http://127.0.0.1:${PORT}/test/scenes.html`);
+  await page.goto(`http://127.0.0.1:${PORT}/test/${PAGE}.html${QUERY ? '?' + QUERY : ''}`);
   await page.waitForFunction(() => window.__ready);
   const t0 = Date.now();
   const stages = await page.evaluate(() => window.__scenes());
   stages.forEach((s, i) => {
-    const f = path.join(OUT, `scene-${i}-${s.label.replace(/[^a-z0-9]+/gi, '-')}.png`);
+    const f = path.join(OUT, `${PAGE}-${i}-${s.label.replace(/[^a-z0-9]+/gi, '-')}.png`);
     fs.writeFileSync(f, Buffer.from(s.png.split(',')[1], 'base64'));
     console.log('wrote', f);
   });

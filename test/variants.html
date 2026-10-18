@@ -1,0 +1,104 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Paintwheel — variants</title>
+<!--
+  A diagnosis sheet: the same two marks (a wash of four overlapping strokes
+  and one single stroke) painted and dried once per variant of the physics,
+  so an artefact can be pinned on the term that makes it. Small grid, so it
+  renders in minutes. Render with tools/scenes.js --page variants.
+-->
+<style>
+  html, body { margin: 0; background: #23242a; color: #ccc; font: 12px system-ui; }
+  #sheet { display: block; }
+</style>
+<canvas id="sheet"></canvas>
+<script src="../js/version.js"></script>
+<script src="../js/pigments.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/logbook.js"></script>
+<script src="../js/shaders.js"></script>
+<script src="../js/sim.js"></script>
+<script src="../js/brush.js"></script>
+<script>
+'use strict';
+const W = 640, H = 400;
+const cv = document.getElementById('sheet');
+cv.style.width = W + 'px'; cv.style.height = H + 'px';
+const sim = new WatercolorSim(cv, { paper: 'rough', maxSim: 320 });
+window.sim = sim;
+const PAINTS = {};
+function usePalette(names) {
+  setPalette(names.map((n) => PAINTBOX.findIndex((p) => p.short === n || p.name === n)));
+  sim.setChannelTextures(1);
+  names.forEach((n, i) => { PAINTS[n] = i; });
+}
+function loadBrush(paint, frac, water) { BRUSH.pig.fill(0); BRUSH.pig[PAINTS[paint]] = 1; BRUSH.setFrac(frac); BRUSH.water = water; }
+function line(x0, y0, x1, y1, size, pressure = 0.6) {
+  const step = Math.max(size * 0.3, 2), dist = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.round(dist / step));
+  const pig = new Float32Array(N_CHANNELS);
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, advance = i === 0 ? step : dist / n;
+    BRUSH.dry(advance);
+    const r = size * (0.5 + pressure);
+    const d = BRUSH.dab(advance, r, pressure, pig, { flow: 1 });
+    sim.splat(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, r, d.water, d.amp, d.wetness, d.scrub);
+  }
+}
+function wetPatch(x, y, r, water = 0.9) {
+  const empty = new Float32Array(N_CHANNELS);
+  const step = Math.max(r * 0.3, 2);
+  for (let yy = y - r; yy <= y + r; yy += step) for (let xx = x - r; xx <= x + r; xx += step) {
+    if (Math.hypot(xx - x, yy - y) > r) continue;
+    sim.splat(xx, yy, r * 0.55, 0.055 * water, empty, water, 0);
+  }
+}
+function dryOut(maxSteps = 900) {
+  const was = sim.params.drySpeed; sim.params.drySpeed = 120;
+  for (let i = 0; i < maxSteps; i += 15) { for (let k = 0; k < 15; k++) sim.step(); if (!sim.anythingWet()) break; }
+  sim.params.drySpeed = was;
+}
+const stages = [];
+// the variants: a label and a function that sets params (after a reset to the defaults)
+const VARIANTS = (new URLSearchParams(location.search).get('v') || 'base,edge0,maran0,wick0,smooth35,diff02').split(',');
+const SET = {
+  base: () => {},
+  edge0: (p) => { p.edgeFlow = 0; p.edgeEvap = 0; },
+  maran0: (p) => { p.maran = 0; },
+  wick0: (p) => { p.wick = 0; p.backrun = 9; },
+  smooth35: (p) => { p.smooth = 0.35; },
+  diff02: (p) => { p.pigDiff = 0.02; },
+  settle03: (p) => { p.settle = 0.03; },
+  grav15: (p) => { p.grav = 15; },
+  combo: (p) => { p.smooth = 0.35; p.pigDiff = 0.02; p.settle = 0.03; },
+  evap0: (p) => { p.edgeEvap = 0; },
+};
+async function paint() {
+  usePalette(['Ultram.', 'Pyrrole']);
+  const base = { ...sim.params, tilt: [0, 0] };
+  const flowBase = { ...sim._flowBase };
+  const cols = 3, pw = W / cols, ph = H / 2;
+  // all variants on one sheet: paint each in its own cell, then dry all
+  VARIANTS.forEach((name, i) => {
+    Object.assign(sim.params, base, { tilt: [0, 0] });
+    (SET[name] || (() => {}))(sim.params);
+    const x = (i % cols) * pw + 14, y = Math.floor(i / cols) * ph + 24;
+    for (let k = 0; k < 3; k++) { loadBrush('Ultram.', 0.42, 0.85); line(x, y + k * 22, x + pw - 28, y + k * 22, 16); }
+    loadBrush('Pyrrole', 0.8, 0.6);
+    line(x, y + 80, x + pw - 28, y + 86, 11, 0.7);
+    // and a bloom: a drop of blue into a clear puddle
+    wetPatch(x + (pw - 28) / 2, y + 148, 36, 0.95);
+    for (let k = 0; k < 20; k++) sim.step();
+    loadBrush('Ultram.', 0.8, 0.75);
+    sim.splat(x + (pw - 28) / 2 - 10, y + 146, 7, 0.04, BRUSH.pig.map((v) => v * 0.00012), 0.75, 0);
+    for (let k = 0; k < 150; k++) sim.step();
+    // each variant must dry under its own physics, so dry now
+    dryOut();
+  });
+  Object.assign(sim.params, base);
+  sim.render();
+  stages.push({ label: VARIANTS.join('-'), png: cv.toDataURL('image/png') });
+  return stages;
+}
+window.__scenes = paint;
+window.__ready = true;
+</script>
