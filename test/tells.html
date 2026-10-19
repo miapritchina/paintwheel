@@ -70,7 +70,7 @@ function line(x0, y0, x1, y1, size, pressure = 0.6) {
     const advance = i === 0 ? step : dist / n;
     BRUSH.dry(advance);
     const d = BRUSH.dab(advance, size, pressure, pig);
-    sim.splat(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, size, d.water, d.amp, d.wetness, d.scrub);
+    sim.splat(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, d.radius, d.water, d.amp, d.wetness, d.scrub);
   }
 }
 

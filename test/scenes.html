@@ -59,7 +59,7 @@ function line(x0, y0, x1, y1, size, pressure = 0.6, wobble = 0) {
     const r = size * (0.5 + p);
     const d = BRUSH.dab(advance, r, p, pig, { flow: 1 });
     const yy = y0 + (y1 - y0) * t + Math.sin(t * 9) * wobble;
-    sim.splat(x0 + (x1 - x0) * t, yy, r, d.water, d.amp, d.wetness, d.scrub);
+    sim.splat(x0 + (x1 - x0) * t, yy, d.radius, d.water, d.amp, d.wetness, d.scrub);
   }
 }
 function wetPatch(x, y, r, water = 0.9) {

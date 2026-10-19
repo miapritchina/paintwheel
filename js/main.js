@@ -993,7 +993,7 @@
       flow: SET.pressFlow ? 1 : 0,
       area: shape ? shape.elong : 1,
     });
-    sim.splat(x, y, size, d.water, d.amp, d.wetness, d.scrub, shape);
+    sim.splat(x, y, d.radius, d.water, d.amp, d.wetness, d.scrub, shape);
     // a clean brush carrying real water re-dissolves paint that has only just
     // set, which is how a bloom starts
     if (wasLoaded < 0.015 && brush.water > 0.35) sim.rewet();

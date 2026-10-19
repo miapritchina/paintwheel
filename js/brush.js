@@ -149,7 +149,9 @@ const BRUSH = (() => {
 
       // Release scales with contact width as well as distance, so a wide
       // brush spends its load faster over the same path and the DEPTH it
-      // leaves comes out the same as a fine one.
+      // leaves comes out the same as a fine one. (Width here is the size
+      // asked for; the wet-splay below widens the footprint without
+      // changing what a stroke costs.)
       //
       // Pressing harder presses more of the belly onto the sheet and lets go
       // of paint faster: `press` runs from 0.46 (a touch) to 1.36 (leaning
@@ -168,6 +170,12 @@ const BRUSH = (() => {
         ? 1 - Math.exp(-reach / RELEASE.generous)
         : 1 - Math.exp(-reach / len);
 
+      // Wet hairs splay and the water wicks wider: a wetter brush wets a
+      // wider footprint for the same size. 0.45 water paints at the size
+      // asked for, dripping wet about 14% wider (27% more paper). The mass
+      // is inverted over that footprint, so the wash is no darker for it,
+      // only wider — which is what a wet brush does.
+      radius *= 0.9 + 0.25 * api.water;
       // a stretched footprint covers `area` times the paper, so the same
       // mass goes on `area` times thinner
       const k = 1 / (FOOTPRINT * radius * radius * area);
@@ -184,7 +192,7 @@ const BRUSH = (() => {
       // A clean damp brush lifts pigment instead of leaving it.
       const scrub = api.frac() < 0.015 ? 0.08 * pressure * api.water : 0;
 
-      return { amp, water, scrub, wetness: api.water };
+      return { amp, water, scrub, wetness: api.water, radius };
     },
 
     // Water leaves faster than pigment does — the paper drinks it — so a long

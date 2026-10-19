@@ -48,6 +48,7 @@ class WatercolorSim {
     // settling itself stalled. The drying code had hit the same floor and
     // been pulsed around it; the clean answer is the extra 16 bits.
     this.texFormat = extF && extLin ? gl.RGBA32F : gl.RGBA16F;
+    this._fullFloat = this.texFormat === gl.RGBA32F;
     const maxAttach = gl.getParameter(gl.MAX_COLOR_ATTACHMENTS);
     if (maxAttach < PIG_TEXTURES + 1) {
       throw new Error(`This device supports only ${maxAttach} MRT attachments; ${PIG_TEXTURES + 1} needed.`);
@@ -81,8 +82,11 @@ class WatercolorSim {
       // its edge; only a flooded passage (overlapping wet strokes, a
       // puddle) creeps outward. At 0.012-0.03 every stroke spread until its
       // film thinned, and every edge went soft.
-      pinLo: 0.035,
-      pinHi: 0.07,
+      // Strokes never creep, even six wet rows deep (about 0.07); a puddle
+      // does. Lower, deep washes crept onto dry paper cell by cell along
+      // the fibre lanes, as a fringe of hairs.
+      pinLo: 0.09,
+      pinHi: 0.16,
       // Surface tension levelling the film. 0.04 let a fifty-texel patch
       // stay thicker than its neighbour for the whole drying time, and the
       // thinner patch dried first, as a front with the rim's evaporation.
@@ -96,7 +100,7 @@ class WatercolorSim {
       // entirely once the rates were slowed to a realistic pace. Applying
       // the same total loss once every `dryPulse` substeps keeps every
       // decrement comfortably above the precision floor.
-      dryPulse: 16,     // substeps between drying updates
+      dryPulse: 16,     // substeps between drying updates (1 in full floats)
       // Open time. Measured on one stroke at these rates: the water's
       // half-life is ~600 steps (ten seconds at 60 fps, twenty at the
       // drying slider's default), and the sheet is dry in about four
@@ -135,6 +139,10 @@ class WatercolorSim {
     };
     // Baselines for the run-off toggle, captured before any opts override.
     this._flowBase = null;
+    // the pulse exists for half-float precision; in full floats drying is
+    // applied every substep, so a drying front moves smoothly rather than
+    // in steps that each leave a ring
+    if (this._fullFloat) this.params.dryPulse = 1;
     this.params.paperSlope = this.paper.paperSlope;
     Object.assign(this.params, opts.params || {});
     this._flowBase = {};
