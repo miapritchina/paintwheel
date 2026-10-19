@@ -82,11 +82,12 @@ class WatercolorSim {
       // its edge; only a flooded passage (overlapping wet strokes, a
       // puddle) creeps outward. At 0.012-0.03 every stroke spread until its
       // film thinned, and every edge went soft.
-      // Strokes never creep, even six wet rows deep (about 0.07); a puddle
-      // does. Lower, deep washes crept onto dry paper cell by cell along
+      // Strokes never creep, nor washes six wet rows deep (about 0.1); a
+      // puddle or a tilted run does. Lower, the rim drift that feeds the
+      // coffee ring pushed deep washes onto dry paper cell by cell along
       // the fibre lanes, as a fringe of hairs.
-      pinLo: 0.09,
-      pinHi: 0.16,
+      pinLo: 0.14,
+      pinHi: 0.25,
       // Surface tension levelling the film. 0.04 let a fifty-texel patch
       // stay thicker than its neighbour for the whole drying time, and the
       // thinner patch dried first, as a front with the rim's evaporation.
