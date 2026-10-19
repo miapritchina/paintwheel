@@ -397,7 +397,11 @@ ${RP.map((i) => `  vec4 n${i} = g${i} - uDt * ((uR > 0.0 ? g${i} * uR : gr${i} *
     vec4 fn = k == 0 ? fl : k == 1 ? fr : k == 2 ? fb : ft;
     float hf = max(f.x, fn.x);
     float mobf = hf / (hf + 0.02) * min(1.0, 0.04 / max(hf, 1e-5));
-    float open = uPin.y <= 0.0 ? 1.0 : mix(smoothstep(uPin.x, uPin.y, hf), 1.0, min(f.w, fn.w));
+    // Levelling stays inside the wet mask. Letting a deep film cross onto
+    // dry paper here made every thick wash grow hairs: the front advanced
+    // cell by cell along the fibre lanes. Runs still spread, through the
+    // velocity fluxes above and their contact-line gate.
+    float open = min(f.w, fn.w);
     float c = min(0.05, 0.25 * (uSmooth + uGrav * mobf)) * open;
     float ex = c * (fn.x - f.x);
     float dif = uPigDiff * uDt * 0.25 * min(f.w, fn.w) * min(mobC, smoothstep(0.0005, 0.01, fn.x));

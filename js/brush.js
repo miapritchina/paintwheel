@@ -172,10 +172,10 @@ const BRUSH = (() => {
 
       // Wet hairs splay and the water wicks wider: a wetter brush wets a
       // wider footprint for the same size. 0.45 water paints at the size
-      // asked for, dripping wet about 14% wider (27% more paper). The mass
+      // asked for, dripping wet about 20% wider (44% more paper). The mass
       // is inverted over that footprint, so the wash is no darker for it,
       // only wider — which is what a wet brush does.
-      radius *= 0.9 + 0.25 * api.water;
+      radius *= 0.85 + 0.35 * api.water;
       // a stretched footprint covers `area` times the paper, so the same
       // mass goes on `area` times thinner
       const k = 1 / (FOOTPRINT * radius * radius * area);
