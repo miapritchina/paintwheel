@@ -318,6 +318,12 @@ uniform float uSmooth;
 uniform float uGrav;
 uniform float uPigDiff;
 uniform float uSaltPush;
+// How freely each pigment rides the water, 0..1. A dye travels with it; a
+// heavy, flocculating pigment lags, settling and catching on the tooth. The
+// difference is what makes a mixed wash SEPARATE as it moves — the rose
+// running to the edges of a bloom while the ultramarine stays and granulates
+// — which is most of what a watercolourist means by colours mingling.
+uniform vec4 uMob[${NP}];
 layout(location=0) out vec4 oFlow;
 ${RP.map((i) => `layout(location=${i + 1}) out vec4 oSusp${i};`).join('\n')}
 
@@ -377,7 +383,7 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, here);
   float fluxT = (vT > 0.0 ? f.x * vT : ft.x * vT) * kT;
   float fluxB = (vB > 0.0 ? fb.x * vB : f.x * vB) * kB;
   float h = f.x - uDt * (fluxR - fluxL + fluxT - fluxB);
-${RP.map((i) => `  vec4 n${i} = g${i} - uDt * ((uR > 0.0 ? g${i} * uR : gr${i} * uR) * kR - (uL > 0.0 ? gl${i} * uL : g${i} * uL) * kL
+${RP.map((i) => `  vec4 n${i} = g${i} - uDt * uMob[${i}] * ((uR > 0.0 ? g${i} * uR : gr${i} * uR) * kR - (uL > 0.0 ? gl${i} * uL : g${i} * uL) * kL
                       + (vT > 0.0 ? g${i} * vT : gt${i} * vT) * kT - (vB > 0.0 ? gb${i} * vB : g${i} * vB) * kB);`).join('\n')}
 
   // Surface tension levelling the film. Written as a PAIRWISE exchange —
@@ -415,7 +421,7 @@ ${RP.map((i) => `  vec4 n${i} = g${i} - uDt * ((uR > 0.0 ? g${i} * uR : gr${i} *
     h += ex;
 ${RP.map((i) => `    {
       vec4 gn = k == 0 ? gl${i} : k == 1 ? gr${i} : k == 2 ? gb${i} : gt${i};
-      n${i} += (ex > 0.0 ? gn : g${i}) * cn + dif * (gn - g${i});
+      n${i} += (ex > 0.0 ? gn : g${i}) * cn * uMob[${i}] + dif * (gn - g${i});
     }`).join('\n')}
   }
 
@@ -749,11 +755,12 @@ ${RP.map((i) => `  {
     Rtot = mix(Rtot, metalRGB, cover);
   }
 
-  float wx = texture(uFlow, uv + vec2(e.x, 0.0)).x - texture(uFlow, uv - vec2(e.x, 0.0)).x;
-  float wy = texture(uFlow, uv + vec2(0.0, e.y)).x - texture(uFlow, uv - vec2(0.0, e.y)).x;
-  vec3 wn = normalize(vec3(-wx * 30.0, -wy * 30.0, 1.0));
-  float spec = pow(max(dot(wn, normalize(lightDir + vec3(0.0, 0.0, 1.0))), 0.0), 60.0);
-  Rtot += spec * 0.06 * smoothstep(0.002, 0.03, f.x);
+  // A wet film has a sheen, but a broad and quiet one: the specular term
+  // that used to live here lit every ripple of the film's surface as a
+  // glint, and a wash looked like wet plastic. The darkening above is the
+  // real look of wet paint on a flat sheet; this adds only a faint, even
+  // gloss where the film is deep.
+  Rtot += 0.025 * smoothstep(0.01, 0.05, f.x);
 
   // undissolved salt grains sit as pale specks
   Rtot = mix(Rtot, vec3(0.96, 0.96, 0.94), 0.55 * smoothstep(0.3, 0.9, s.z));

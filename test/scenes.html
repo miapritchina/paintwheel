@@ -89,7 +89,7 @@ function snap(label) { sim.render(); stages.push({ label, png: cv.toDataURL('ima
 const P = (c, r) => ({ x: c * 340 + 24, y: r * 233 + 30, w: 292, h: 180 });
 
 async function paint() {
-  usePalette(['Ultram.', 'Lemon', 'Pyrrole', 'Gran. Bk']);
+  usePalette(['Ultram.', 'Lemon', 'Pyrrole', 'Gran. Bk', 'Opera']);
   sim.clearAll();
 
   // 1. flat wash — overlapping strokes of a juicy mid-strength load
@@ -134,12 +134,16 @@ async function paint() {
     loadBrush('Pyrrole', 0.7, 0.16);
     line(p.x, p.y + 125, p.x + p.w, p.y + 115, 18, 0.45, 6);
   }
-  // 6. a charged stroke — one load, pressure swelling and easing
+  // 6. separation — a wash of ultramarine and rose, one to one, laid wet and
+  //    left to move: the rose should run to the edges and the blue stay and
+  //    granulate; then one charged stroke of the same mix
   { const p = P(2, 1);
-    loadBrush('Pyrrole', 0.9, 0.7);
-    line(p.x, p.y + 40, p.x + p.w, p.y + 60, 14, (t) => 0.25 + 0.65 * Math.sin(t * Math.PI), 14);
-    loadBrush('Ultram.', 0.9, 0.5);
-    line(p.x, p.y + 130, p.x + p.w, p.y + 120, 10, (t) => 0.9 - 0.7 * t, 10);
+    for (let k = 0; k < 3; k++) {
+      loadBrush({ 'Ultram.': 1, 'Opera': 1 }, 0.5, 0.95);
+      line(p.x + 10, p.y + 30 + k * 26, p.x + p.w - 10, p.y + 30 + k * 26, 20);
+    }
+    loadBrush({ 'Ultram.': 1, 'Opera': 1 }, 0.9, 0.7);
+    line(p.x, p.y + 140, p.x + p.w, p.y + 150, 12, (t) => 0.25 + 0.65 * Math.sin(t * Math.PI), 10);
   }
   dryOut();
   // 7. backrun — water into a wash that has lost its shine

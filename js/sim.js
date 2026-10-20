@@ -1094,6 +1094,8 @@ class WatercolorSim {
       gl.uniform1f(p.uniforms.uPigDiff, P.pigDiff);
       gl.uniform1f(p.uniforms.uSaltPush, P.saltPush);
       gl.uniform2f(p.uniforms.uPin, P.pinLo, P.pinHi);
+      this._ensurePigParams();
+      gl.uniform4fv(p.uniforms.uMob, this._pigParams.mob);
       this._draw();
       this.flow.swap();
       this.susp.forEach((pr) => pr.swap());
@@ -1247,8 +1249,10 @@ class WatercolorSim {
     const n = PIG_TEXTURES * 4;
     this._pigParams = this._pigParams || {
       rho: new Float32Array(n), omega: new Float32Array(n), gamma: new Float32Array(n), grain: new Float32Array(n),
+      mob: new Float32Array(n),
     };
     this._pigParams.rho.fill(0);
+    this._pigParams.mob.fill(1);
     this._pigParams.gamma.fill(0);
     this._pigParams.grain.fill(0);
     // omega is a divisor: default 1 for unused channels to avoid div-by-zero
@@ -1259,6 +1263,11 @@ class WatercolorSim {
       this._pigParams.omega[i] = pg.omega;
       this._pigParams.gamma[i] = pg.gamma;
       this._pigParams.grain[i] = pg.grain;
+      // transport mobility from density and flocculation: a quinacridone
+      // (rho 0.02, gamma 0.05) rides at ~0.9, ultramarine (0.05, 0.91) at
+      // ~0.5, the granulating black (0.11, 1.0) at ~0.3
+      this._pigParams.mob[i] = pg.mob != null ? pg.mob
+        : Math.max(0.25, (1 - 5 * pg.rho)) * (1 - 0.4 * pg.gamma);
     });
   }
 }
