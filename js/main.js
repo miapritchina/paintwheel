@@ -450,6 +450,10 @@
   const buildEl = document.getElementById('buildinfo');
   const updNote = document.getElementById('updnote');
   buildEl.textContent = buildLabel;
+  // which engine the device actually runs: full floats, or the half-float
+  // fallback with its precision floor
+  const gpuEl = document.getElementById('gpuinfo');
+  if (gpuEl) gpuEl.textContent = `${sim.gpu.format === 'RGBA32F' ? 'full-float' : 'HALF-FLOAT'} engine · ${sim.gpu.maxAttach} targets${sim.gpu.renderer ? ' · ' + sim.gpu.renderer : ''}`;
 
   document.getElementById('checkupd').addEventListener('click', async () => {
     updNote.textContent = 'Checking…';

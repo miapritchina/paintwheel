@@ -47,8 +47,16 @@ class WatercolorSim {
     // every substep invented pigment (measured: +40% over one stroke) and
     // settling itself stalled. The drying code had hit the same floor and
     // been pulsed around it; the clean answer is the extra 16 bits.
-    this.texFormat = extF && extLin ? gl.RGBA32F : gl.RGBA16F;
+    const half = !!opts.half || /[?&]half=1/.test(location.search); // force the fallback, for testing
+    this.texFormat = extF && extLin && !half ? gl.RGBA32F : gl.RGBA16F;
     this._fullFloat = this.texFormat === gl.RGBA32F;
+    // what the device offered, for the session log and the settings panel
+    this.gpu = {
+      format: this._fullFloat ? 'RGBA32F' : 'RGBA16F',
+      colorBufferFloat: !!extF, colorBufferHalfFloat: !!extHF, floatLinear: !!extLin,
+      maxAttach: gl.getParameter(gl.MAX_COLOR_ATTACHMENTS),
+      renderer: (() => { const d = gl.getExtension('WEBGL_debug_renderer_info'); return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : null; })(),
+    };
     const maxAttach = gl.getParameter(gl.MAX_COLOR_ATTACHMENTS);
     if (maxAttach < PIG_TEXTURES + 1) {
       throw new Error(`This device supports only ${maxAttach} MRT attachments; ${PIG_TEXTURES + 1} needed.`);
@@ -149,6 +157,14 @@ class WatercolorSim {
     // applied every substep, so a drying front moves smoothly rather than
     // in steps that each leave a ring
     if (this._fullFloat) this.params.dryPulse = 1;
+    // Half floats resolve one part in a thousand. At the rates that give a
+    // wash its real open time, a substep's evaporation is a few hundredths
+    // of a percent of the film and a substep's settling a few hundredths of
+    // a percent of the load: both round to nothing, so a wash on such a
+    // device never dried and never settled. The fallback applies them in
+    // pulses large enough to register: drying every 128 substeps, settling
+    // and lifting every 8, each at the matching multiple of the rate.
+    else { this.params.dryPulse = 128; this.params.settlePulse = 8; }
     this.params.paperSlope = this.paper.paperSlope;
     Object.assign(this.params, opts.params || {});
     this._flowBase = {};
@@ -1108,6 +1124,10 @@ class WatercolorSim {
       // deposit texture where the hardware has the attachments for it;
       // otherwise two draws over the same pre-pass state (suspension
       // update, then deposit update). Swap everything after.
+      // (Pulsed on the half-float fallback, see settlePulse.)
+      const sp = P.settlePulse || 1;
+      this._settlePhase = (this._settlePhase || 0) + 1;
+      if (this._settlePhase % sp !== 0) { if (this._rewet > 0) this._rewet--; continue; }
       this._ensurePigParams();
       const passes = this.mergedTransfer
         ? [['transferBoth', [...this.susp, ...this.dep]]]
@@ -1122,8 +1142,8 @@ class WatercolorSim {
         gl.uniform4fv(p.uniforms.uOmega, this._pigParams.omega);
         gl.uniform4fv(p.uniforms.uGamma, this._pigParams.gamma);
         gl.uniform4fv(p.uniforms.uGrain, this._pigParams.grain);
-        gl.uniform1f(p.uniforms.uSettle, P.settle);
-        gl.uniform1f(p.uniforms.uLift, P.lift * (this._rewet > 0 ? 12 : 1));
+        gl.uniform1f(p.uniforms.uSettle, P.settle * sp);
+        gl.uniform1f(p.uniforms.uLift, P.lift * sp * (this._rewet > 0 ? 12 : 1));
         this._draw();
       }
       this.susp.forEach((pr) => pr.swap());

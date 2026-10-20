@@ -66,6 +66,7 @@ const LOGBOOK = (() => {
         durationFrames: frame,
         viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1 },
         sheet: window.sim ? { w: sim.sheetW, h: sim.sheetH } : null,
+        gpu: window.sim ? sim.gpu : null,
         channels: CHANNELS.map((p) => (p ? `${p.name} (${p.ci})` : null)),
         pans: PANS.map((p) => p.paint.name),
         ...extra,
