@@ -6,10 +6,10 @@
 //   2. height    - continuity: conservative upwind fluxes of h*vel, and the
 //                  suspended pigment riding the same fluxes; levelling
 //   3. moisture  - evaporation (boosted at wash edges -> edge darkening),
-//                  absorption into the capillary layer of the paper
-//   4. capillary - fiber wicking; damp cells re-wetted by an advancing wet
-//                  front rejoin the wet mask (backruns)
-//   5. transfer  - pigment deposition onto / lifting off the paper, with
+//                  absorption into the capillary layer of the paper, fiber
+//                  wicking, and damp cells re-wetted by fresh water
+//                  rejoining the wet mask (backruns) — one merged pass
+//   4. transfer  - pigment deposition onto / lifting off the paper, with
 //                  per-pigment density, staining and granulation
 //   7. render    - Kubelka-Munk optical compositing of 16 pigment channels
 //                  over textured paper, plus wet-sheen shading
@@ -254,7 +254,12 @@ void main() {
   // Marangoni flow: paint lowers surface tension, so fluid is pulled from
   // painted regions toward clean water (log-concentration per the Gibbs
   // isotherm) — this drives wet-on-wet blooms. Fibers modulate -> feathering.
-  float fiber = 0.5 + 1.0 * texture(uPaper, vUV).z;
+  // The whole block is skipped when the term is off (run-off disabled): the
+  // five pigTotal calls below are 5 texture reads PER PIGMENT TEXTURE per
+  // cell per substep, the most expensive thing in this pass.
+  float fiberNoise = texture(uPaper, vUV).z;
+  if (uMaran > 0.0) {
+  float fiber = 0.5 + 1.0 * fiberNoise;
   float pc = pigTotal(vUV);
   vec2 gp = 0.5 * vec2(pigTotal(vUV + vec2(uTexel.x, 0.0)) - pigTotal(vUV - vec2(uTexel.x, 0.0)),
                        pigTotal(vUV + vec2(0.0, uTexel.y)) - pigTotal(vUV - vec2(0.0, uTexel.y)));
@@ -276,10 +281,11 @@ void main() {
   float rel = length(gp) / (pc + 0.02);
   float real = smoothstep(0.08, 0.25, rel);
   target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.003, 0.018, h) * wmin * real;
+  }
 
   // device tilt: only a genuinely wet film runs (drips), damp washes hold;
   // fiber modulation breaks the advancing front into fingers
-  target += uTilt * smoothstep(0.025, 0.1, h) * (0.7 + 0.6 * texture(uPaper, vUV).z);
+  target += uTilt * smoothstep(0.025, 0.1, h) * (0.7 + 0.6 * fiberNoise);
 
   vec2 vel = mix(target, f.yz, uInertia);
   vel *= w * smoothstep(0.0003, 0.004, h);
@@ -429,6 +435,9 @@ uniform float uAbsorb;
 uniform float uRunAbsorb;
 uniform float uSatEvap;
 uniform float uWetThresh;
+uniform float uWick;
+uniform float uWickThresh;
+uniform float uBackrun;
 layout(location=0) out vec4 oFlow;
 layout(location=1) out vec4 oSat;
 
@@ -490,27 +499,13 @@ void main() {
     s.z = max(s.z - uDt * 0.0007 * smoothstep(0.0005, 0.01, h + soak), 0.0);
   }
 
-  oFlow = vec4(h, f.yz, w);
-  oSat = s;
-}`;
-
-// ------------------------------------------------------------ capillary ----
-SHADERS.capillary = `#version 300 es
-${COMMON}
-uniform sampler2D uFlow;
-uniform sampler2D uSat;
-uniform sampler2D uPaper;
-uniform float uWick;
-uniform float uWickThresh;
-uniform float uBackrun;
-layout(location=0) out vec4 oFlow;
-layout(location=1) out vec4 oSat;
-
-void main() {
-  vec4 f = texture(uFlow, vUV);
-  vec4 s = texture(uSat, vUV);
-  float cap = texture(uPaper, vUV).y;
-
+  // Capillary wicking between fibers, in the same pass (it was its own,
+  // round-tripping the full state every substep; merged, this half works
+  // on the cell's just-updated state while neighbours are a substep stale,
+  // far below anything visible). Paper is not a homogeneous sponge: wicking
+  // runs along fiber bundles and stalls between them, which is why a damp
+  // fringe creeps out ragged and feathered. Each exchange is weighted by
+  // the fiber noise of BOTH cells so it stays symmetric.
   float transfer = 0.0;
   float wetNbr = 0.0;
   for (int k = 0; k < 4; k++) {
@@ -518,12 +513,13 @@ void main() {
              : k == 2 ? vec2(0.0, uTexel.y) : vec2(0.0, -uTexel.y);
     float sn = texture(uSat, vUV + off).x;
     vec4 fn = texture(uFlow, vUV + off);
+    float wmod = 0.35 + 0.65 * (pap.z + texture(uPaper, vUV + off).z);
     // only a neighbour carrying FRESH water counts — a dab's worth, not the
     // thin film of a drying front, or every drying wash blistered into
     // cauliflowers wherever a spot dried first
     wetNbr = max(wetNbr, fn.w * smoothstep(0.012, 0.03, fn.x));
-    if (sn > uWickThresh) transfer += max(sn - s.x, 0.0);
-    if (s.x > uWickThresh) transfer -= max(s.x - sn, 0.0);
+    if (sn > uWickThresh) transfer += wmod * max(sn - s.x, 0.0);
+    if (s.x > uWickThresh) transfer -= wmod * max(s.x - sn, 0.0);
   }
   s.x = clamp(s.x + uWick * uDt * transfer, 0.0, cap * 1.2);
 
@@ -534,22 +530,27 @@ void main() {
   // not invent it. (An additive term here made saturated paper a perpetual
   // water source, so a wash could never finish drying.)
   float thresh = uBackrun * cap;
-  if (s.x > thresh && f.w < 0.6 && wetNbr > 0.7) {
+  if (s.x > thresh && w < 0.6 && wetNbr > 0.7) {
     float release = min(uDt * 0.15 * (s.x - thresh) + 0.002, s.x * 0.5);
-    f.w = max(f.w, 0.75);
-    f.x += release;
+    w = max(w, 0.75);
+    h += release;
     s.x -= release;
   }
-  oFlow = f;
+
+  oFlow = vec4(h, f.yz, w);
   oSat = s;
 }`;
 
 // ------------------------------------------------------------- transfer ----
 // Deposition / lifting between suspension and paper (Curtis et al. 1997 §4.5,
-// with rewetting on its own resolubility timescale). Split into two draws
-// (suspension update, deposit update) so no pass needs more than NP MRT
-// attachments — the WebGL2 guaranteed minimum is 4. Both read the same
-// pre-pass state and compute identical down/up amounts.
+// with rewetting on its own resolubility timescale).
+//
+// The natural shape is ONE pass writing 2*NP targets (every suspension and
+// every deposit texture), but the WebGL2 guaranteed MRT minimum is only 4 —
+// so there is a split form, two draws that read the same pre-pass state and
+// compute identical down/up amounts, for devices at the minimum. Hardware
+// that reports enough attachments (8 is typical, desktop and Apple GPUs
+// alike) gets the merged form: half the texture reads and half the draws.
 const TRANSFER_BODY = (outs) => `#version 300 es
 ${COMMON}
 uniform sampler2D uFlow;
@@ -562,7 +563,9 @@ uniform vec4 uGamma[${NP}];
 uniform vec4 uGrain[${NP}]; // granulation size: 0 fine tooth .. 1 coarse
 uniform float uSettle;
 uniform float uLift;
-${RP.map((i) => `layout(location=${i}) out vec4 o${i};`).join('\n')}
+${outs === 'both'
+    ? RP.map((i) => `layout(location=${i}) out vec4 oS${i};\nlayout(location=${NP + i}) out vec4 oD${i};`).join('\n')
+    : RP.map((i) => `layout(location=${i}) out vec4 o${i};`).join('\n')}
 
 void main() {
   vec4 f = texture(uFlow, vUV);
@@ -588,11 +591,14 @@ ${RP.map((i) => `  {
     vec4 up = d${i} * clamp((vec4(1.0) + (phE - 1.0) * uGamma[${i}]) / uOmega[${i}] * liftGate, 0.0, 1.0);
     down = min(down, max(vec4(4.0) - d${i}, 0.0));
     up = min(up, max(vec4(4.0) - g${i}, 0.0));
-    o${i} = ${outs === 'susp' ? `g${i} - down + up` : `d${i} + down - up`};
+${outs === 'both'
+      ? `    oS${i} = g${i} - down + up;\n    oD${i} = d${i} + down - up;`
+      : `    o${i} = ${outs === 'susp' ? `g${i} - down + up` : `d${i} + down - up`};`}
   }`).join('\n')}
 }`;
 SHADERS.transferSusp = TRANSFER_BODY('susp');
 SHADERS.transferDep = TRANSFER_BODY('dep');
+SHADERS.transferBoth = TRANSFER_BODY('both');
 
 // --------------------------------------------------------------- render ----
 SHADERS.render = `#version 300 es
@@ -651,6 +657,11 @@ void main() {
   vec4 pap = texture(uPaper, uv);
 ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, uv);\n  vec4 d${i} = texture(uDep${i}, uv);`).join('\n')}
 
+  // Total deposit at this pixel, taken from the samples above BEFORE the
+  // granulation reshaping below — the rim gradient's neighbour taps read the
+  // raw textures, so its centre tap must be raw too.
+  float dC = ${RP.map((i) => `dot(d${i}, vec4(1.0))`).join(' + ')};
+
   // Granulating pigment piles into paper valleys; at render scale that reads
   // as optical thickness following the inverse of paper height. Each paint's
   // grain parameter picks fine tooth vs coarse structure.
@@ -687,6 +698,25 @@ ${RP.map((i) => `  {
   float lam = 0.88 + 0.12 * max(dot(n, lightDir), 0.0);
   vec3 Rpaper = uPaperColor * lam * (0.96 + 0.04 * pap.z);
 
+  // Wet paper darkens because water fills the pores and index-matches the
+  // fibers: less scattering, and light trapped by internal reflection in the
+  // film makes extra passes through the absorbing sheet (Ångström; Lekner &
+  // Dorf 1988). The multiple passes make the darkening a POWER of the dry
+  // reflectance — which also deepens colour, since dark channels fall faster
+  // than light ones — not a flat multiplier. Driven by fiber saturation
+  // (a damp sheet is dark long after the shine has gone) plus the free film.
+  float wetSub = clamp(clamp(s.x, 0.0, 1.0) * 0.85
+                       + smoothstep(0.0005, 0.02, f.x) * 0.5
+                       + f.w * 0.15, 0.0, 1.0);
+  Rpaper = pow(Rpaper, vec3(1.0 + 0.75 * wetSub));
+
+  // The pigment itself is darker while wet, for the mirrored reason: water
+  // index-matches the pigment particles, so scattering S collapses toward
+  // zero and the layer acts as a nearly pure absorber; as the wash dries the
+  // air returns between the grains, S recovers, and the colour lightens —
+  // "watercolor dries lighter", the painter's constant complaint, for free.
+  S *= mix(1.0, 0.55, wetSub);
+
   vec3 Rtot = Rpaper;
   if (total > 1e-5) {
     vec3 R, T;
@@ -698,15 +728,10 @@ ${RP.map((i) => `  {
   // classic watercolor rim), sampled at 2-texel radius so grain-scale
   // granulation doesn't read as edges.
   vec2 e2 = uTexel * 2.0;
-  float dC = depTotal(uv);
   float rimGrad = length(vec2(depTotal(uv + vec2(e2.x, 0.0)) - depTotal(uv - vec2(e2.x, 0.0)),
                               depTotal(uv + vec2(0.0, e2.y)) - depTotal(uv - vec2(0.0, e2.y)))) * 0.5;
   float rim = clamp(rimGrad * 0.9, 0.0, 0.30) * smoothstep(0.02, 0.3, dC);
   Rtot *= 1.0 - rim;
-
-  // wet areas look darker & glossier
-  float wetvis = clamp(f.w * 0.35 + smoothstep(0.0, 0.04, f.x) * 0.55 + s.x * 0.08, 0.0, 1.0);
-  Rtot *= mix(1.0, 0.89, wetvis);
 
   // Metallic layer, over the top of the finished watercolor. Mica is a
   // scatter of flat flakes, so the sheen is not a smooth highlight but a

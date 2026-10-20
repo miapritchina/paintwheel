@@ -54,12 +54,22 @@ RGBA32F textures (RGBA16F where the GPU cannot render to full floats):
    **granulation**.
 3. **Capillary layer** — water absorbed into the sheet wicks between fibers;
    when it seeps back into a drying wash it re-wets it and produces
-   **backruns** ("cauliflowers").
+   **backruns** ("cauliflowers"). Wicking is deliberately *heterogeneous*:
+   paper is not a uniform sponge, it is a mat of fiber bundles, and Darcy
+   flow through it runs fast along a bundle and stalls between them. Each
+   cell-to-cell exchange is weighted by the fiber noise of both cells (the
+   pair average keeps the exchange symmetric, so heterogeneity cannot create
+   or destroy water) — which is why a damp fringe creeps outward ragged and
+   feathered rather than as a smooth blurred halo.
 4. **Kubelka-Munk rendering** — colors are not RGB-blended: every pixel
    composites the pigment mixture optically over textured paper using the
    measured K (absorption) / S (scattering) spectra from the Curtis paper.
    That's why ultramarine + hansa yellow makes green, glazes behave like
    glazes, and cadmiums cover while quinacridones stain transparently.
+   (No Saunderson surface-reflection correction on top, and deliberately:
+   each paint's K/S is inverted from its *observed* mass tone and undertone
+   colours, so the air/paint interface reflection is already baked into the
+   calibration — adding the correction would count it twice.)
 
 The paint box reproduces the artist's real paint wheel, pigment by
 pigment (Colour Index codes in parentheses): Cadmium Lemon (PY35), Irgazin
@@ -106,6 +116,20 @@ Beyond the papers, the model borrows two effects:
   stroke keeps the edge its brush gave it and only a flooded passage
   creeps. Inside the wet mask flow is free.
 
+- **Wet things are darker** — two distinct optical mechanisms, both in the
+  render pass and neither of them a "darken by 11%" fudge (which is what
+  they replaced). *Wet paper* darkens because water fills the pores and
+  index-matches the cellulose fibers: light trapped by internal reflection
+  in the film makes extra passes through the absorbing sheet, so the wet
+  reflectance is a **power** of the dry one (Ångström's argument, quantified
+  by Lekner & Dorf 1988) — which also deepens colour, since dark channels
+  fall faster than light ones. *Wet pigment* is darker for the mirrored
+  reason: water index-matches the pigment particles, so Kubelka-Munk
+  scattering S collapses and the layer acts as a nearly pure absorber; as
+  the wash dries, air returns between the grains, S recovers, and the colour
+  lightens. That is "watercolor dries lighter" — the painter's constant
+  complaint — falling out of the optics instead of being painted on.
+
 ### What the numbers had to say
 
 The marks were checked against a sheet of real painter's marks
@@ -150,7 +174,6 @@ reached:
   finer now; the fibre field is lanes rather than speckle, which is what
   breaks an advancing bloom into fingers; and rim evaporation is a fifth of
   what it was, a ring being a share of the pigment, not the lot.
-
 ## The brush: two independent axes
 
 Water and paint are separate quantities on the hairs, and they do separate
@@ -363,6 +386,22 @@ frame in the old build. Three changes:
   dab, and instead of ping-ponging the whole texture the region is copied
   back, so a 4px brush costs a few hundred texels per dab rather than four
   hundred thousand.
+- **Fewer, fatter passes.** Every pass is memory-bound — its real cost is
+  writing and re-reading the full state textures — so two merges cut the
+  per-substep traffic directly. Moisture and capillary were two passes each
+  round-tripping flow+sat; they are one pass now (the capillary half sees
+  neighbours one substep stale, far below anything visible). And the
+  deposition/lifting stage, which reads flow, paper and *every* pigment
+  texture, used to run as two identical draws purely because the WebGL2
+  guaranteed MRT minimum is 4 attachments; on hardware that reports enough
+  attachments (8 is typical — desktop and Apple GPUs alike) it now updates
+  every suspension and deposit texture in a single draw: half the reads and
+  half the draws of the heaviest stage in the pipeline. Devices at the
+  minimum keep the split form. The render pass also stopped re-fetching
+  every deposit texture for the rim-gradient centre tap (the samples were
+  already in registers), and the velocity pass skips its Marangoni
+  pigment-gradient taps — five per pigment texture per cell — entirely when
+  run-off is off.
 
 ## Settings (⚙)
 
@@ -547,3 +586,8 @@ python3 -m http.server 8000
   darkening trick adopted in the render pass
 - Corel patent US 9,240,063 — three-layer canvas & rewetting model that
   informed the dried-paint resolubility behavior
+- Lekner & Dorf, *Why some things are darker when wet*, Applied Optics 27(7)
+  1988 — internal reflection in the wetting film makes wet reflectance a
+  power of dry reflectance; the wet-paper darkening model
+- Jensen, Legakis & Dorsey, *Rendering of Wet Materials*, EG Workshop on
+  Rendering 1999 — wet-surface albedo reduction in practice
