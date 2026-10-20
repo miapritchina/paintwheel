@@ -349,6 +349,9 @@ uniform vec2 uPin; // film depth at which a face into dry paper opens: from, to
 // coarse relief, a feature twenty-odd cells across), so a bead held at a
 // stroke's edge breaks through in a few places first and a run goes down
 // the sheet as tongues rather than as a flat front.
+// the damp band in which salt works
+float band(float hn) { return smoothstep(0.0004, 0.003, hn) * (1.0 - smoothstep(0.05, 0.15, hn)); }
+
 float pin(float hUpwind, float wDest, float aroundDest, float grainDest) {
   if (uPin.y <= 0.0) return 1.0;
   // a straight front has three of the nine wet (0.33), the tip of a
@@ -373,20 +376,7 @@ void main() {
   vec4 fb = texture(uFlow, vUV - oT);
   vec4 ft = texture(uFlow, vUV + oT);
 
-  // salt: a dissolving grain draws water toward itself and shoves pigment
-  // outward, leaving the pale starburst. Active only while the wash is in
-  // the damp band — too wet and the salt just dissolves, too dry and it
-  // merely sits on the surface (like real salt timing). A local shift of the
-  // pigment field: the one place a resample is still used.
-  vec2 here = vUV;
-  if (uSaltPush > 0.0) {
-    vec2 e2 = uTexel * 2.0;
-    vec2 gs = 0.5 * vec2(texture(uSat, vUV + vec2(e2.x, 0.0)).z - texture(uSat, vUV - vec2(e2.x, 0.0)).z,
-                         texture(uSat, vUV + vec2(0.0, e2.y)).z - texture(uSat, vUV - vec2(0.0, e2.y)).z);
-    float dampBand = smoothstep(0.0004, 0.003, f.x) * (1.0 - smoothstep(0.05, 0.15, f.x));
-    here += gs * uSaltPush * uTexel * dampBand;
-  }
-${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, here);
+${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);
   vec4 gl${i} = texture(uSusp${i}, vUV - oR);
   vec4 gr${i} = texture(uSusp${i}, vUV + oR);
   vec4 gb${i} = texture(uSusp${i}, vUV - oT);
@@ -404,9 +394,10 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, here);
   // capillary barrier: a face into a dry cell passes only what a deep film
   // sends. Without this a stroke kept spreading for as long as it stayed
   // wet, and every edge went soft. Inside the wet mask flow is free.
-  float aC = texture(uSat, vUV).w;
-  float aR = texture(uSat, vUV + oR).w, aL = texture(uSat, vUV - oR).w;
-  float aT = texture(uSat, vUV + oT).w, aB = texture(uSat, vUV - oT).w;
+  vec4 sC = texture(uSat, vUV);
+  vec4 sR = texture(uSat, vUV + oR), sL = texture(uSat, vUV - oR);
+  vec4 sT = texture(uSat, vUV + oT), sB = texture(uSat, vUV - oT);
+  float aC = sC.w, aR = sR.w, aL = sL.w, aT = sT.w, aB = sB.w;
   float qC = texture(uPaper, vUV).w;
   float qR = texture(uPaper, vUV + oR).w, qL = texture(uPaper, vUV - oR).w;
   float qT = texture(uPaper, vUV + oT).w, qB = texture(uPaper, vUV - oT).w;
@@ -421,6 +412,24 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, here);
   float h = f.x - uDt * (fluxR - fluxL + fluxT - fluxB);
 ${RP.map((i) => `  vec4 n${i} = g${i} - uDt * uMob[${i}] * ((uR > 0.0 ? g${i} * uR : gr${i} * uR) * kR - (uL > 0.0 ? gl${i} * uL : g${i} * uL) * kL
                       + (vT > 0.0 ? g${i} * vT : gt${i} * vT) * kT - (vB > 0.0 ? gb${i} * vB : g${i} * vB) * kB);`).join('\n')}
+
+  // Salt: a dissolving grain shoves the pigment outward, leaving the pale
+  // starburst. Active only while the wash is in the damp band — too wet
+  // and the salt just dissolves, too dry and it merely sits on the surface
+  // (like real salt timing). It used to be done by resampling the pigment
+  // field a few texels sideways, the one resample left in the engine, and
+  // a resample is not conservative: two cells could read the same source
+  // texel and a sprinkle of salt made pigment. Now it is a pigment-only
+  // face flux down the salt gradient, upwind and symmetric like the rest.
+  if (uSaltPush > 0.0 && sC.z + sR.z + sL.z + sT.z + sB.z > 0.0) {
+    float bC = band(f.x);
+    float vR = clamp((sC.z - sR.z) * uSaltPush * 0.05, -0.12, 0.12) * 0.5 * (bC + band(fr.x));
+    float vL = clamp((sL.z - sC.z) * uSaltPush * 0.05, -0.12, 0.12) * 0.5 * (bC + band(fl.x));
+    float vT = clamp((sC.z - sT.z) * uSaltPush * 0.05, -0.12, 0.12) * 0.5 * (bC + band(ft.x));
+    float vB = clamp((sB.z - sC.z) * uSaltPush * 0.05, -0.12, 0.12) * 0.5 * (bC + band(fb.x));
+${RP.map((i) => `    n${i} -= uDt * ((vR > 0.0 ? g${i} * vR : gr${i} * vR) - (vL > 0.0 ? gl${i} * vL : g${i} * vL)
+                 + (vT > 0.0 ? g${i} * vT : gt${i} * vT) - (vB > 0.0 ? gb${i} * vB : g${i} * vB));`).join('\n')}
+  }
 
   // Surface tension levelling the film. Written as a PAIRWISE exchange —
   // the coefficient min(w_a, w_b) is symmetric, so whatever one cell gives

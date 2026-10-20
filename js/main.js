@@ -758,34 +758,68 @@
   const TILT_DEAD = 5; // degrees
   let tiltSmooth = null;
 
+  // Where "down" is, in the device's own frame, from the orientation
+  // angles: (sin g cos b, -sin b, -cos g cos b). The angles themselves are
+  // not usable as a tilt: gamma is the roll about the screen's vertical
+  // axis, and with the phone held upright in the hand (beta near 90) it
+  // is undefined — the sensor flips it between +90 and -90 at random — so
+  // "the water runs left while the phone is in portrait" was gamma
+  // swinging. In the vector the swing is multiplied by cos(beta), which
+  // is what the geometry says it is worth: nothing.
+  function downVector(e) {
+    const b = ((e.beta || 0) * Math.PI) / 180, g = ((e.gamma || 0) * Math.PI) / 180;
+    return [Math.sin(g) * Math.cos(b), -Math.sin(b), -Math.cos(g) * Math.cos(b)];
+  }
+  // Rotate v by the rotation that carries `from` onto straight down, so a
+  // tilt is measured from however the device was held when tilt went on.
+  function relativeTo(v, from) {
+    const e = [0, 0, -1];
+    const ax = [from[1] * e[2] - from[2] * e[1], from[2] * e[0] - from[0] * e[2], from[0] * e[1] - from[1] * e[0]];
+    const sn = Math.hypot(ax[0], ax[1], ax[2]);
+    const cs = Math.max(-1, Math.min(1, from[0] * e[0] + from[1] * e[1] + from[2] * e[2]));
+    if (sn < 1e-6) return cs > 0 ? v : [-v[0], v[1], -v[2]];
+    const k = [ax[0] / sn, ax[1] / sn, ax[2] / sn];
+    // Rodrigues: v cos + (k x v) sin + k (k.v)(1 - cos)
+    const kv = [k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]];
+    const kd = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+    return [0, 1, 2].map((i) => v[i] * cs + kv[i] * sn + k[i] * kd * (1 - cs));
+  }
+
   function onOrient(e) {
     if (!tiltOn) return;
     if (e.beta == null && e.gamma == null) return; // a reading with no data
     tiltGotEvent = true;
-    if (!tiltRef) tiltRef = { beta: e.beta, gamma: e.gamma || 0 };
-    const raw = { beta: e.beta - tiltRef.beta, gamma: (e.gamma || 0) - tiltRef.gamma };
+    const down = downVector(e);
+    if (!tiltRef) tiltRef = down;
+    const rel = relativeTo(down, tiltRef);
+    // in the screen plane: how far down points sideways, as sin(tilt)
+    const raw = [rel[0], rel[1]];
     if (!tiltSmooth) tiltSmooth = raw;
     else {
-      tiltSmooth.beta += 0.12 * (raw.beta - tiltSmooth.beta);
-      tiltSmooth.gamma += 0.12 * (raw.gamma - tiltSmooth.gamma);
+      tiltSmooth[0] += 0.12 * (raw[0] - tiltSmooth[0]);
+      tiltSmooth[1] += 0.12 * (raw[1] - tiltSmooth[1]);
     }
-    const past = (d) => Math.sign(d) * Math.max(0, Math.abs(d) - TILT_DEAD);
-    const dBeta = past(tiltSmooth.beta);
-    const dGamma = past(tiltSmooth.gamma);
-    // device frame
-    const gx = Math.sin((dGamma * Math.PI) / 180);
-    const gy = Math.sin((dBeta * Math.PI) / 180);
+    // dead band on the angle, then back to a sine of what is past it
+    const m = Math.hypot(tiltSmooth[0], tiltSmooth[1]);
+    const ang = (Math.asin(Math.min(1, m)) * 180) / Math.PI;
+    const past = Math.max(0, ang - TILT_DEAD);
+    const sc = m > 1e-6 ? Math.sin((past * Math.PI) / 180) / m : 0;
+    // device frame: gx = down points right, gy = down points toward the
+    // top of the device (so it is negative for the usual lean)
+    const gx = tiltSmooth[0] * sc;
+    const gy = tiltSmooth[1] * sc;
     // -> screen frame
     const a = screenAngle();
     const c = Math.cos(a), s = Math.sin(a);
-    const sx = gx * c + gy * s;
-    const sy = -gx * s + gy * c;
+    const sx = gx * c - gy * s;
+    const sy = gx * s + gy * c;
     // with run-off switched off nothing travels, tilt included
     const k = sim.params.flow ? 0.25 * SET.tiltStrength : 0;
-    sim.params.tilt = [sx * k, -sy * k];
+    // sheet v points up the screen, like device y
+    sim.params.tilt = [sx * k, sy * k];
     if (Math.abs(sx) + Math.abs(sy) > 0.01) sim.markDirty();
-    window.__tiltDebug = { beta: e.beta, gamma: e.gamma, dBeta, dGamma,
-                           angleDeg: (a * 180) / Math.PI, tilt: sim.params.tilt };
+    window.__tiltDebug = { beta: e.beta, gamma: e.gamma, down, rel, angleDeg: ang,
+                           screenAngle: (a * 180) / Math.PI, tilt: sim.params.tilt };
   }
 
   // Motion access has to be asked for from a user gesture on iOS, and there

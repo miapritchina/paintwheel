@@ -158,6 +158,12 @@ reached:
   only the picture did, so the picture is now shaded once per grid cell
   into an ordinary 8-bit texture and magnified from there. Settings → About
   says which engine a device got.
+- **Salt made pigment.** The starburst was done by resampling the pigment
+  field a few texels sideways, the one resample left in the engine, and a
+  resample is not conservative: two cells could read the same source
+  texel. It is now a pigment-only face flux down the salt gradient,
+  upwind and symmetric like every other transport term. Measured: a
+  sprinkle of salt on a wash changes the total pigment by under 0.1%.
 - **A run left a stroke as a comb of single-pixel trickles** ("water seeps
   into the paper as thin lines"). Four things conspired. The tilt flow was
   sped up and slowed down cell by cell by the fibre noise, meant to break
@@ -561,11 +567,15 @@ way to report "this didn't behave like real watercolor".
   angle you are holding the device at when you switch it on is taken as
   level, so you can work at whatever angle is comfortable rather than flat
   on a table, and the reading is rotated into screen space so it points
-  downhill on an iPad held sideways too. Readings are smoothed and the
-  first five degrees away from level do nothing: a hand is never still,
-  and taken raw every wobble ran the water a different way. **Tilt
-  strength** in Settings sets how steeply it runs; with run-off off, tilt
-  does nothing.
+  downhill on an iPad held sideways too. The tilt is taken from where
+  gravity points in the device's frame, not from the beta and gamma
+  angles themselves: gamma is undefined with the phone held upright in
+  the hand and the sensor flips it between +90 and −90, which is why the
+  water used to run left in portrait with nobody tilting anything.
+  Readings are smoothed and the first five degrees away from level do
+  nothing: a hand is never still, and taken raw every wobble ran the
+  water a different way. **Tilt strength** in Settings sets how steeply
+  it runs; with run-off off, tilt does nothing.
 - **Dry**: hold to flash-dry the sheet, then glaze over — dried washes
   resist re-blending except through deliberate rewetting.
 - **Save** exports a PNG.
