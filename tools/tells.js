@@ -8,7 +8,7 @@
 //   python3 -m http.server 8779
 'use strict';
 
-const { chromium } = require('playwright');
+const { launch } = require('./browser');
 const fs = require('fs');
 
 const arg = (k, d) => {
@@ -21,15 +21,12 @@ const JSON_OUT = arg('--json', null);
 const BASE = arg('--base', null);
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-  });
+  const browser = await launch();
   const page = await browser.newPage({ viewport: { width: 960, height: 700 }, deviceScaleFactor: 1 });
   page.setDefaultTimeout(600000);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/favicon/.test(m.location().url || '')) errors.push(m.text() + ' ' + (m.location().url || '')); });
 
   await page.goto(`http://127.0.0.1:${PORT}/test/tells.html`);
   await page.waitForFunction(() => window.__ready);

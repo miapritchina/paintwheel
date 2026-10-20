@@ -4,7 +4,7 @@
 //
 // Needs a static server on the repo root, as tools/tells.js does.
 'use strict';
-const { chromium } = require('playwright');
+const { launch } = require('./browser');
 const fs = require('fs');
 const path = require('path');
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
@@ -14,15 +14,12 @@ const PAGE = arg('--page', 'scenes');
 const QUERY = arg('--query', '');
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-  });
+  const browser = await launch();
   const page = await browser.newPage({ viewport: { width: 1040, height: 720 }, deviceScaleFactor: 1 });
   page.setDefaultTimeout(1800000);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/favicon/.test(m.location().url || '')) errors.push(m.text() + ' ' + (m.location().url || '')); });
   await page.goto(`http://127.0.0.1:${PORT}/test/${PAGE}.html${QUERY ? '?' + QUERY : ''}`);
   await page.waitForFunction(() => window.__ready);
   const t0 = Date.now();

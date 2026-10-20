@@ -10,20 +10,17 @@
 // rotation and a change of detail, a hold on a pan solos its colour. Needs
 // a static server on the repo root, as tools/tells.js does.
 'use strict';
-const { chromium } = require('playwright');
+const { launch } = require('./browser');
 const pi = process.argv.indexOf('--port');
 const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-  });
+  const browser = await launch();
   const page = await browser.newPage({ viewport: { width: 1024, height: 768 }, deviceScaleFactor: 1 });
   page.setDefaultTimeout(600000);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !/favicon/.test(m.location().url || '')) errors.push(m.text() + ' ' + (m.location().url || '')); });
   await page.goto(`http://127.0.0.1:${PORT}/index.html?t=${Date.now()}`);
   await page.waitForFunction(() => window.sim && window.brush && window.__input);
   await page.evaluate(async () => {

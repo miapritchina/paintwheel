@@ -592,6 +592,8 @@ way to report "this didn't behave like real watercolor".
   PNG to be judged by eye (`--page variants` renders `test/variants.html`,
   the same marks under several physics settings with mass totals traced)
 - `tools/input.js` — the input contract, checked headlessly against the app
+- `tools/browser.js` — the headless browser the tools share: the GPU when
+  there is one, SwiftShader when there is not
 
 ## PWA & persistence
 
@@ -611,6 +613,24 @@ Any static file server works:
 python3 -m http.server 8000
 # then open http://localhost:8000
 ```
+
+## Checking a change
+
+The tools in `tools/` drive the test pages in headless Chromium:
+
+```
+npm i --no-save --no-package-lock playwright   # once
+python3 -m http.server 8779 &                  # from the repo root
+node tools/scenes.js --out /tmp/scenes         # scenes as PNGs to look at
+node tools/scenes.js --page variants           # mass totals through drying
+node tools/tells.js                            # the 8 measured watercolour tells
+node tools/input.js                            # the hand and Pencil contract
+```
+
+On a Mac they use the installed Chrome on the GPU (ANGLE on Metal), and each
+run takes 10-20 seconds. In a GPU-less cloud container they fall back to
+SwiftShader, which renders WebGL on the CPU and takes tens of minutes for the
+same run; `PW_SWIFTSHADER=1` forces that path anywhere.
 
 ## References
 
