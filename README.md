@@ -592,6 +592,10 @@ way to report "this didn't behave like real watercolor".
   PNG to be judged by eye (`--page variants` renders `test/variants.html`,
   the same marks under several physics settings with mass totals traced)
 - `tools/input.js` — the input contract, checked headlessly against the app
+- `test/tilt.html` — tilt against water: five marks from a damp brush to a
+  puddle, one sheet per angle, pictured at 1, 4 and 10 s and dry, with how
+  far each ran, its threads, and the pigment total (`--page tilt`,
+  `--query a=0,20,45&s=1&dir=0`)
 - `tools/browser.js` — the headless browser the tools share: the GPU when
   there is one, SwiftShader when there is not
 
@@ -625,6 +629,7 @@ node tools/scenes.js --out /tmp/scenes         # scenes as PNGs to look at
 node tools/scenes.js --page variants           # mass totals through drying
 node tools/tells.js                            # the 8 measured watercolour tells
 node tools/input.js                            # the hand and Pencil contract
+node tools/scenes.js --page tilt               # tilt angles against water amounts
 ```
 
 On a Mac they use the installed Chrome on the GPU (ANGLE on Metal), and each

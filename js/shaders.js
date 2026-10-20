@@ -495,6 +495,8 @@ uniform float uEvap;
 uniform float uEdgeEvap;
 uniform float uAbsorb;
 uniform float uRunAbsorb;
+uniform vec2 uTilt;
+uniform float uMaxSpeed;
 uniform float uSatEvap;
 uniform float uWetThresh;
 uniform float uWick;
@@ -536,7 +538,23 @@ void main() {
   // Only a genuine run drinks like this. The gate used to open at a speed
   // the brush's own outward push reaches, so an ordinary stroke's water was
   // drunk within a second or two of landing and wet-in-wet had no open time.
-  float running = uRunAbsorb * uDt * stillDry * smoothstep(0.07, 0.095, speed);
+  //
+  // But the motion tilt gives a wash's body is not a front. On a steep
+  // sheet the whole of a fresh wash moves at the speed cap over the dry
+  // paper it was laid on, and with the speed gate alone all of it soaked in
+  // within a second of tilting: a steeper sheet ran SHORTER than a gentle
+  // one (measured: 140 px at 20 degrees, 40 at 45). So the gate reads the
+  // velocity with tilt's share taken out (the same share the velocity
+  // pass adds, under the same cap), and tilt's share drinks only at the front, where the wet mask's
+  // 3x3 mean (s.w, from the last substep) says some neighbours are still
+  // dry. Flat, nothing changes: tilt's share is zero.
+  vec2 tiltVel = uTilt * smoothstep(0.025, 0.1, h);
+  float tl = length(tiltVel);
+  if (tl > uMaxSpeed) tiltVel *= uMaxSpeed / tl;
+  float gBody = smoothstep(0.07, 0.095, length(f.yz - tiltVel));
+  float gAll = smoothstep(0.07, 0.095, speed);
+  float front = 1.0 - smoothstep(0.8, 0.97, s.w);
+  float running = uRunAbsorb * uDt * stillDry * (gBody + front * max(gAll - gBody, 0.0));
   float absorb = min((uAbsorb * uDt + running) * max(cap - s.x, 0.0), max(h, 0.0));
   s.x += absorb;
   h -= absorb;

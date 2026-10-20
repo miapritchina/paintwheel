@@ -1141,6 +1141,8 @@ class WatercolorSim {
       gl.uniform1f(p.uniforms.uEdgeEvap, P.edgeEvap);
       gl.uniform1f(p.uniforms.uAbsorb, P.absorb * dry);
       gl.uniform1f(p.uniforms.uRunAbsorb, P.runAbsorb);
+      gl.uniform2f(p.uniforms.uTilt, P.tilt[0], P.tilt[1]);
+      gl.uniform1f(p.uniforms.uMaxSpeed, P.maxSpeed);
       gl.uniform1f(p.uniforms.uSatEvap, P.satEvap * dry);
       gl.uniform1f(p.uniforms.uWetThresh, P.wetThresh);
       gl.uniform1f(p.uniforms.uWick, P.wick);

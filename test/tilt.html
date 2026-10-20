@@ -1,0 +1,230 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="generated-by" content="Claude" data-source="test/scenes.html harness" data-purpose="review how tilt and water amount combine">
+<title>Paintwheel — tilt and water</title>
+<!--
+  Tilt against water. Five marks side by side, from a damp brush to a
+  puddle, painted on one sheet per tilt angle and left to run downhill:
+  pictures at 1, 4 and 10 seconds and dried, plus numbers for each mark —
+  how far it ran, how many separate threads cross it halfway down, and
+  whether the pigment on the sheet stayed the pigment put down. Render it
+  with tools/scenes.js --page tilt [--query a=0,10,20&s=1&dir=0].
+
+  Tilt is set as the app sets it (js/main.js): a 5 degree dead band, then
+  0.25 * strength * sin(angle past the band). dir is the downhill
+  direction in degrees from straight down the screen, positive toward
+  the right (dir=45 runs down and to the right).
+-->
+<style>
+  html, body { margin: 0; background: #23242a; }
+  #sheet { display: block; }
+</style>
+<canvas id="sheet"></canvas>
+
+<script src="../js/version.js"></script>
+<script src="../js/pigments.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/logbook.js"></script>
+<script src="../js/shaders.js"></script>
+<script src="../js/sim.js"></script>
+<script src="../js/brush.js"></script>
+<script>
+'use strict';
+
+const W = 1020, H = 700;
+const Q = new URLSearchParams(location.search);
+const ANGLES = (Q.get('a') || '0,10,20,30,45,70').split(',').map(Number);
+const STRENGTH = Number(Q.get('s') || 1);
+const DIR = Number(Q.get('dir') || 0);
+
+const cv = document.getElementById('sheet');
+cv.style.width = W + 'px';
+cv.style.height = H + 'px';
+const sim = new WatercolorSim(cv, { paper: 'rough', maxSim: 440 });
+window.sim = sim;
+
+const PAINTS = {};
+function usePalette(names) {
+  setPalette(names.map((n) => PAINTBOX.findIndex((p) => p.short === n || p.name === n)));
+  sim.setChannelTextures(1);
+  names.forEach((n, i) => { PAINTS[n] = i; });
+}
+function loadBrush(paint, frac, water) {
+  BRUSH.pig.fill(0);
+  BRUSH.pig[PAINTS[paint]] = 1;
+  BRUSH.setFrac(frac);
+  BRUSH.water = water;
+}
+function line(x0, y0, x1, y1, size, pressure = 0.6) {
+  const step = Math.max(size * 0.3, 2);
+  const dist = Math.hypot(x1 - x0, y1 - y0);
+  const n = Math.max(1, Math.round(dist / step));
+  const pig = new Float32Array(N_CHANNELS);
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const advance = i === 0 ? step : dist / n;
+    BRUSH.dry(advance);
+    const d = BRUSH.dab(advance, size * (0.5 + pressure), pressure, pig, { flow: 1 });
+    sim.splat(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, d.radius, d.water, d.amp, d.wetness, d.scrub);
+  }
+}
+function wetPatch(x, y, r, water = 0.95) {
+  const empty = new Float32Array(N_CHANNELS);
+  const step = Math.max(r * 0.3, 2);
+  for (let yy = y - r; yy <= y + r; yy += step) {
+    for (let xx = x - r; xx <= x + r; xx += step) {
+      if (Math.hypot(xx - x, yy - y) > r) continue;
+      sim.splat(xx, yy, r * 0.55, 0.055 * water, empty, water, 0);
+    }
+  }
+}
+function run(steps) { for (let i = 0; i < steps; i++) sim.step(); }
+function dryOut(maxSteps = 1500) {
+  const was = sim.params.drySpeed;
+  sim.params.drySpeed = 600;
+  for (let i = 0; i < maxSteps; i += 15) {
+    run(15);
+    if (!sim.anythingWet()) break;
+  }
+  sim.params.drySpeed = was;
+}
+
+function tiltFor(angleDeg) {
+  const past = Math.max(0, angleDeg - 5);
+  const m = Math.sin((past * Math.PI) / 180) * 0.25 * STRENGTH;
+  const d = (DIR * Math.PI) / 180;
+  // sheet v points up the screen, so downhill-down-the-screen is -v
+  return [Math.sin(d) * m, -Math.cos(d) * m];
+}
+
+// read a state texture back as floats; rows are bottom-up
+function readTex(tex) {
+  const gl = sim.gl;
+  if (!sim._readFbo) sim._readFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sim._readFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  const b = new Float32Array(sim.simW * sim.simH * 4);
+  gl.readPixels(0, 0, sim.simW, sim.simH, gl.RGBA, gl.FLOAT, b);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return b;
+}
+
+const COLS = [
+  { name: 'damp brush', x: 102 },
+  { name: 'wet brush', x: 306 },
+  { name: 'juicy brush', x: 510 },
+  { name: 'wash', x: 714 },
+  { name: 'puddle + colour', x: 918 },
+];
+const TOP = 100; // css y of the marks
+
+// per mark: how far down the screen pigment reached past the mark, and how
+// many separate threads cross a scanline halfway down that reach
+function measure() {
+  const sw = sim.simW, sh = sim.simH;
+  const sx = sw / W, sy = sh / H;
+  const susp = readTex(sim.susp[0].read);
+  const dep = readTex(sim.dep[0].read);
+  const flow = readTex(sim.flow.read);
+  const pig = (i, j) => { const k = 4 * (j * sw + i); return susp[k] + dep[k] + susp[k + 1] + dep[k + 1]; };
+  let pigTotal = 0, water = 0;
+  const sat = readTex(sim.sat.read);
+  let held = 0;
+  for (let k = 0; k < susp.length; k += 4) { pigTotal += susp[k] + dep[k] + susp[k + 1] + dep[k + 1]; water += flow[k]; held += sat[k]; }
+  const out = COLS.map((c) => {
+    const i0 = Math.round((c.x - 96) * sx), i1 = Math.round((c.x + 96) * sx);
+    // lowest screen row with pigment (largest css y)
+    let reach = 0;
+    for (let j = 0; j < sh; j++) {
+      let hit = false;
+      for (let i = i0; i < i1 && !hit; i++) if (pig(i, j) > 0.02) hit = true;
+      if (hit) { reach = Math.max(reach, (sh - 1 - j) / sy); }
+    }
+    const below = Math.max(0, reach - (TOP + 40));
+    // threads: count runs of pigmented cells on a scanline halfway down the run
+    let threads = 0, widest = 0;
+    if (below > 20) {
+      const yc = TOP + 40 + below / 2;
+      const j = Math.round(sh - 1 - yc * sy);
+      let inRun = false, len = 0;
+      for (let i = i0; i < i1; i++) {
+        const on = pig(i, j) > 0.02;
+        if (on && !inRun) { threads++; len = 0; }
+        if (on) { len++; widest = Math.max(widest, len); }
+        inRun = on;
+      }
+      widest /= sx;
+    }
+    return { ran: Math.round(below), threads, widest: Math.round(widest) };
+  });
+  return { pigTotal, water, held, cols: out };
+}
+
+const trace = [];
+window.__trace = trace;
+const stages = [];
+
+function paintMarks() {
+  sim.clearAll();
+  // damp, wet, juicy: one stroke each, the same load of colour
+  loadBrush('Ultram.', 0.5, 0.3);
+  line(COLS[0].x - 80, TOP, COLS[0].x + 80, TOP, 14);
+  loadBrush('Ultram.', 0.5, 0.6);
+  line(COLS[1].x - 80, TOP, COLS[1].x + 80, TOP, 14);
+  loadBrush('Ultram.', 0.5, 0.95);
+  line(COLS[2].x - 80, TOP, COLS[2].x + 80, TOP, 14);
+  // a wash: four overlapping juicy strokes
+  for (let k = 0; k < 4; k++) {
+    loadBrush('Ultram.', 0.45, 0.9);
+    line(COLS[3].x - 80, TOP - 30 + k * 20, COLS[3].x + 80, TOP - 30 + k * 20, 18);
+  }
+  // a puddle of clear water with colour dropped into it
+  wetPatch(COLS[4].x, TOP, 60);
+  loadBrush('Pyrrole', 0.7, 0.8);
+  line(COLS[4].x - 40, TOP, COLS[4].x + 40, TOP, 12);
+}
+
+async function paint() {
+  usePalette(['Ultram.', 'Pyrrole']);
+  const shot = document.createElement('canvas');
+  shot.width = W; shot.height = H;
+  const g = shot.getContext('2d');
+  for (const a of ANGLES) {
+    sim.params.tilt = [0, 0];
+    paintMarks();
+    sim.render();
+    const before = measure().pigTotal;
+    sim.params.tilt = tiltFor(a);
+    const frames = [];
+    let t = 0;
+    for (const [label, to] of [['1s', 60], ['4s', 240], ['10s', 600]]) {
+      run(to - t); t = to;
+      sim.render();
+      frames.push([label, await createImageBitmap(cv)]);
+      const m = measure();
+      trace.push(`${a}deg ${label}: ` + m.cols.map((c, i) => `${COLS[i].name} ran ${c.ran}px threads ${c.threads} widest ${c.widest}px`).join(' | ')
+        + `  film ${m.water.toFixed(1)} in paper ${m.held.toFixed(1)}`);
+    }
+    dryOut();
+    sim.render();
+    frames.push(['dry', await createImageBitmap(cv)]);
+    const m = measure();
+    trace.push(`${a}deg dry: ` + m.cols.map((c, i) => `${COLS[i].name} ran ${c.ran}px threads ${c.threads}`).join(' | ')
+      + `  pigment ${before.toFixed(0)} -> ${m.pigTotal.toFixed(0)} (${(100 * (m.pigTotal / before - 1)).toFixed(2)}%)`);
+    // 2 x 2 at half size
+    g.fillStyle = '#23242a'; g.fillRect(0, 0, W, H);
+    frames.forEach(([label, bmp], i) => {
+      const x = (i % 2) * W / 2, y = Math.floor(i / 2) * H / 2;
+      g.drawImage(bmp, x, y, W / 2, H / 2);
+      g.fillStyle = '#000'; g.font = '14px sans-serif';
+      g.fillText(`${a}° s${STRENGTH} dir${DIR}  ${label}`, x + 8, y + H / 2 - 8);
+    });
+    g.strokeStyle = '#23242a'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(W / 2, 0); g.lineTo(W / 2, H); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
+    stages.push({ label: `${a}deg-s${STRENGTH}-dir${DIR}`, png: shot.toDataURL('image/png') });
+  }
+  return stages;
+}
+window.__scenes = paint;
+window.__ready = true;
+</script>
