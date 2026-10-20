@@ -453,7 +453,7 @@
   // which engine the device actually runs: full floats, or the half-float
   // fallback with its precision floor
   const gpuEl = document.getElementById('gpuinfo');
-  if (gpuEl) gpuEl.textContent = `${sim.gpu.format === 'RGBA32F' ? 'full-float' : 'HALF-FLOAT'} engine · ${sim.gpu.maxAttach} targets${sim.gpu.renderer ? ' · ' + sim.gpu.renderer : ''}`;
+  if (gpuEl) gpuEl.textContent = `${sim.gpu.format === 'RGBA32F' ? 'full-float' : 'HALF-FLOAT'} engine (${sim.gpu.filter}) · ${sim.gpu.maxAttach} targets${sim.gpu.renderer ? ' · ' + sim.gpu.renderer : ''}`;
 
   document.getElementById('checkupd').addEventListener('click', async () => {
     updNote.textContent = 'Checking…';
@@ -750,14 +750,28 @@
   }
 
   let tiltGotEvent = false;
+  // A hand is never still, and the sensor jitters by a degree on its own.
+  // Taken raw, every wobble of the phone ran the water a different way
+  // ("left, top, left" with the phone just held). Readings are smoothed,
+  // and the first few degrees away from level do nothing at all: a sheet
+  // has to be tilted on purpose before a wash runs.
+  const TILT_DEAD = 5; // degrees
+  let tiltSmooth = null;
 
   function onOrient(e) {
     if (!tiltOn) return;
     if (e.beta == null && e.gamma == null) return; // a reading with no data
     tiltGotEvent = true;
     if (!tiltRef) tiltRef = { beta: e.beta, gamma: e.gamma || 0 };
-    const dBeta = e.beta - tiltRef.beta;
-    const dGamma = (e.gamma || 0) - tiltRef.gamma;
+    const raw = { beta: e.beta - tiltRef.beta, gamma: (e.gamma || 0) - tiltRef.gamma };
+    if (!tiltSmooth) tiltSmooth = raw;
+    else {
+      tiltSmooth.beta += 0.12 * (raw.beta - tiltSmooth.beta);
+      tiltSmooth.gamma += 0.12 * (raw.gamma - tiltSmooth.gamma);
+    }
+    const past = (d) => Math.sign(d) * Math.max(0, Math.abs(d) - TILT_DEAD);
+    const dBeta = past(tiltSmooth.beta);
+    const dGamma = past(tiltSmooth.gamma);
     // device frame
     const gx = Math.sin((dGamma * Math.PI) / 180);
     const gy = Math.sin((dBeta * Math.PI) / 180);
@@ -766,7 +780,8 @@
     const c = Math.cos(a), s = Math.sin(a);
     const sx = gx * c + gy * s;
     const sy = -gx * s + gy * c;
-    const k = 0.25 * SET.tiltStrength;
+    // with run-off switched off nothing travels, tilt included
+    const k = sim.params.flow ? 0.25 * SET.tiltStrength : 0;
     sim.params.tilt = [sx * k, -sy * k];
     if (Math.abs(sx) + Math.abs(sy) > 0.01) sim.markDirty();
     window.__tiltDebug = { beta: e.beta, gamma: e.gamma, dBeta, dGamma,
@@ -783,6 +798,7 @@
   function stopTilt(msg) {
     tiltOn = false;
     tiltRef = null;
+    tiltSmooth = null;
     clearTimeout(tiltWatchdog);
     window.removeEventListener('deviceorientation', onOrient);
     sim.params.tilt = [0, 0];
@@ -819,6 +835,7 @@
 
     tiltOn = true;
     tiltRef = null; // however you are holding it right now IS level
+    tiltSmooth = null;
     tiltGotEvent = false;
     tiltBtn.style.background = 'rgba(120,180,255,0.35)';
     window.addEventListener('deviceorientation', onOrient);

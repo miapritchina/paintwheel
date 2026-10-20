@@ -38,7 +38,9 @@ The model follows Curtis, Anderson, Seims, Fleischer & Salesin,
 *Computer-Generated Watercolor* (SIGGRAPH 1997), with boundary-evaporation
 ideas from Chu & Tai, *MoXi: Real-Time Ink Dispersion in Absorbent Paper*
 (SIGGRAPH 2005), implemented as WebGL2 fragment-shader passes over ping-ponged
-RGBA32F textures (RGBA16F where the GPU cannot render to full floats):
+RGBA32F textures (RGBA16F where the GPU cannot render to full floats; the
+finished picture is shaded at grid resolution into an RGBA8 frame and
+magnified onto the screen from there):
 
 1. **Shallow-water layer** — a film of water on the sheet. It levels under
    its own weight and surface tension, as an exchange between neighbouring
@@ -147,9 +149,36 @@ reached:
   "deposit plus that" is representable, so every substep made pigment and
   settling itself stalled. Transport is now one conservative upwind pass
   for water and pigment together, and the state lives in full floats where
-  the GPU can render and filter them (every iPad since WebGL2 can; the
-  half-float path remains as a fallback). Measured: a wash plus a stroke
-  plus a bloom, dried, holds its pigment to the unit.
+  the GPU can render to them (the half-float path remains as a fallback).
+  Measured: a wash plus a stroke plus a bloom, dried, holds its pigment to
+  the unit. Apple GPUs render to full floats but will not filter them, and
+  for a while that alone sent every iPhone and iPad down the half-float
+  path (which is what "it looks worse than before" on a phone was). The
+  simulation never needed the filter — every pass reads at cell centres —
+  only the picture did, so the picture is now shaded once per grid cell
+  into an ordinary 8-bit texture and magnified from there. Settings → About
+  says which engine a device got.
+- **A run left a stroke as a comb of single-pixel trickles** ("water seeps
+  into the paper as thin lines"). Four things conspired. The tilt flow was
+  sped up and slowed down cell by cell by the fibre noise, meant to break
+  the front into fingers, but a flow that varies cell to cell is a field
+  of sinks and sources, and the body of a run drained into threads along
+  the noise. Water crossing the contact line went one cell at a time along
+  whichever row the tilt pointed down, and the levelling that would have
+  widened a thread was confined to the wet mask. The backrun rule opened
+  cells one at a time wherever wicking along a fibre had dampened the
+  sheet enough, so wet islands marched ahead of the front. And a cell the
+  sheet drank dry in the middle of a run could never be re-wetted by a
+  film of ordinary depth, so runs were peppered with pinholes. Now: the run
+  moves as one film; a face into dry paper (for the velocity fluxes and
+  the levelling alike) opens in proportion to how wet the destination's
+  surroundings are — a 3×3 mean of the wet mask, carried in a spare
+  channel of the moisture texture so both sides of a face agree and the
+  flux stays conservative — so a broad front advances and the tip of a
+  thread does not; the backrun opening takes the same gate; a pinhole with
+  wet film all round it closes over; and the fingering comes from the
+  contact line instead, which opens sooner where the sheet's coarse grain
+  is open, so a bead breaks through in a few places and runs as tongues.
 - **A stroke's water was gone in under five seconds.** The imbibition term
   meant for tilted runs fired on the brush's own push. The rates are now
   set so one stroke's water has a half-life of about 600 steps — ten
@@ -532,8 +561,11 @@ way to report "this didn't behave like real watercolor".
   angle you are holding the device at when you switch it on is taken as
   level, so you can work at whatever angle is comfortable rather than flat
   on a table, and the reading is rotated into screen space so it points
-  downhill on an iPad held sideways too. **Tilt strength** in Settings sets
-  how steeply it runs.
+  downhill on an iPad held sideways too. Readings are smoothed and the
+  first five degrees away from level do nothing: a hand is never still,
+  and taken raw every wobble ran the water a different way. **Tilt
+  strength** in Settings sets how steeply it runs; with run-off off, tilt
+  does nothing.
 - **Dry**: hold to flash-dry the sheet, then glaze over — dried washes
   resist re-blending except through deliberate rewetting.
 - **Save** exports a PNG.

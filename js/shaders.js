@@ -283,9 +283,15 @@ void main() {
   target += -uMaran * fiber * (gp / (pc + 0.08)) * smoothstep(0.003, 0.018, h) * wmin * real;
   }
 
-  // device tilt: only a genuinely wet film runs (drips), damp washes hold;
-  // fiber modulation breaks the advancing front into fingers
-  target += uTilt * smoothstep(0.025, 0.1, h) * (0.7 + 0.6 * fiberNoise);
+  // device tilt: only a genuinely wet film runs (drips), damp washes hold.
+  // The run moves as one film: it used to be sped up and slowed down cell
+  // by cell by the fibre noise, meant to break the front into fingers, but
+  // a flow that varies cell to cell is a field of sinks and sources, and
+  // the body of the run drained into threads along the noise (while the
+  // sheet drank the gaps dry). Fingers come from the contact line instead:
+  // the transport pass lets the front through sooner where the sheet's
+  // grain is open.
+  target += uTilt * smoothstep(0.025, 0.1, h);
 
   vec2 vel = mix(target, f.yz, uInertia);
   vel *= w * smoothstep(0.0003, 0.004, h);
@@ -329,10 +335,34 @@ ${RP.map((i) => `layout(location=${i + 1}) out vec4 oSusp${i};`).join('\n')}
 
 // how much of a face flux gets through: all of it into a wet cell, and into
 // a dry one only what a film deeper than the capillary barrier can send
+uniform sampler2D uPaper;
 uniform vec2 uPin; // film depth at which a face into dry paper opens: from, to
-float pin(float hUpwind, float wDest) {
+// A front advances as a front. Water leaving a stroke for dry paper used
+// to go one cell at a time along whichever row the tilt pointed down, and
+// a run was a comb of single-texel trickles. Surface tension will not
+// hold a thread that thin: the contact line moves where the wet side is
+// broad behind it, and a cell with hardly a wet neighbour (the tip of a
+// thread) is not wetted at all. The destination's wet surroundings come
+// from the moisture pass (sat.w, a 3x3 mean of the wet mask), so a face
+// computes the same way from either side and the flux stays conservative.
+// The barrier is lower where the sheet's grain is open (the paper's
+// coarse relief, a feature twenty-odd cells across), so a bead held at a
+// stroke's edge breaks through in a few places first and a run goes down
+// the sheet as tongues rather than as a flat front.
+float pin(float hUpwind, float wDest, float aroundDest, float grainDest) {
   if (uPin.y <= 0.0) return 1.0;
-  return mix(smoothstep(uPin.x, uPin.y, hUpwind), 1.0, clamp(wDest, 0.0, 1.0));
+  // a straight front has three of the nine wet (0.33), the tip of a
+  // two-cell thread two (0.22): the gate sits between them
+  float front = smoothstep(0.2, 0.34, aroundDest);
+  float ease = 0.75 + 0.5 * grainDest;
+  // A cell the sheet drank dry in the middle of a run is not a contact
+  // line: with wet film all round it, the film closes over it. Without
+  // this the hole was permanent (nothing of ordinary depth could cross
+  // back in) and a run was peppered with pinholes.
+  // (seven or more of the nine: a pinhole, not a notch in the front — at
+  // five the film crept over the sheet by chain reaction)
+  float inside = smoothstep(0.7, 0.9, aroundDest);
+  return mix(smoothstep(uPin.x, uPin.y, hUpwind * ease) * front, 1.0, max(clamp(wDest, 0.0, 1.0), inside));
 }
 
 void main() {
@@ -374,10 +404,16 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, here);
   // capillary barrier: a face into a dry cell passes only what a deep film
   // sends. Without this a stroke kept spreading for as long as it stayed
   // wet, and every edge went soft. Inside the wet mask flow is free.
-  float kR = uR > 0.0 ? pin(f.x, fr.w) : pin(fr.x, f.w);
-  float kL = uL > 0.0 ? pin(fl.x, f.w) : pin(f.x, fl.w);
-  float kT = vT > 0.0 ? pin(f.x, ft.w) : pin(ft.x, f.w);
-  float kB = vB > 0.0 ? pin(fb.x, f.w) : pin(f.x, fb.w);
+  float aC = texture(uSat, vUV).w;
+  float aR = texture(uSat, vUV + oR).w, aL = texture(uSat, vUV - oR).w;
+  float aT = texture(uSat, vUV + oT).w, aB = texture(uSat, vUV - oT).w;
+  float qC = texture(uPaper, vUV).w;
+  float qR = texture(uPaper, vUV + oR).w, qL = texture(uPaper, vUV - oR).w;
+  float qT = texture(uPaper, vUV + oT).w, qB = texture(uPaper, vUV - oT).w;
+  float kR = uR > 0.0 ? pin(f.x, fr.w, aR, qR) : pin(fr.x, f.w, aC, qC);
+  float kL = uL > 0.0 ? pin(fl.x, f.w, aC, qC) : pin(f.x, fl.w, aL, qL);
+  float kT = vT > 0.0 ? pin(f.x, ft.w, aT, qT) : pin(ft.x, f.w, aC, qC);
+  float kB = vB > 0.0 ? pin(fb.x, f.w, aB, qB) : pin(f.x, fb.w, aC, qC);
   float fluxR = (uR > 0.0 ? f.x * uR : fr.x * uR) * kR;
   float fluxL = (uL > 0.0 ? fl.x * uL : f.x * uL) * kL;
   float fluxT = (vT > 0.0 ? f.x * vT : ft.x * vT) * kT;
@@ -409,11 +445,22 @@ ${RP.map((i) => `  vec4 n${i} = g${i} - uDt * uMob[${i}] * ((uR > 0.0 ? g${i} * 
     vec4 fn = k == 0 ? fl : k == 1 ? fr : k == 2 ? fb : ft;
     float hf = max(f.x, fn.x);
     float mobf = hf / (hf + 0.02) * min(1.0, 0.04 / max(hf, 1e-5));
-    // Levelling stays inside the wet mask. Letting a deep film cross onto
-    // dry paper here made every thick wash grow hairs: the front advanced
-    // cell by cell along the fibre lanes. Runs still spread, through the
-    // velocity fluxes above and their contact-line gate.
-    float open = min(f.w, fn.w);
+    // Levelling crosses the contact line under the same gate as the
+    // velocity fluxes: a film deep enough to push over the sheet's
+    // barrier, into surroundings that are already broadly wet. Kept
+    // strictly inside the wet mask, a tilted run that broke through at
+    // one cell had nowhere to go but straight on: the cell behind drained
+    // into it, it drained into the next, and the run was a comb of
+    // single-texel threads. With the gate, a thread's tip is closed (its
+    // surroundings are dry) and its flanks are open (the thread itself
+    // is behind them), so a breakthrough widens into a front instead.
+    // The earlier worry — a thick wash growing hairs along the fibre
+    // lanes — was this same threading, and the cohesion term is what
+    // stops it.
+    float aN = k == 0 ? aL : k == 1 ? aR : k == 2 ? aB : aT;
+    float qN = k == 0 ? qL : k == 1 ? qR : k == 2 ? qB : qT;
+    float cross = fn.x > f.x ? pin(fn.x, f.w, aC, qC) : pin(f.x, fn.w, aN, qN);
+    float open = clamp(max(f.w, fn.w), 0.0, 1.0) * cross;
     float c = min(0.05, 0.25 * (uSmooth + uGrav * mobf)) * open;
     float ex = c * (fn.x - f.x);
     float dif = uPigDiff * uDt * 0.25 * min(f.w, fn.w) * min(mobC, smoothstep(0.0005, 0.01, fn.x));
@@ -514,11 +561,13 @@ void main() {
   // the fiber noise of BOTH cells so it stays symmetric.
   float transfer = 0.0;
   float wetNbr = 0.0;
+  float around = f.w;
   for (int k = 0; k < 4; k++) {
     vec2 off = k == 0 ? vec2(uTexel.x, 0.0) : k == 1 ? vec2(-uTexel.x, 0.0)
              : k == 2 ? vec2(0.0, uTexel.y) : vec2(0.0, -uTexel.y);
     float sn = texture(uSat, vUV + off).x;
     vec4 fn = texture(uFlow, vUV + off);
+    around += fn.w;
     float wmod = 0.35 + 0.65 * (pap.z + texture(uPaper, vUV + off).z);
     // only a neighbour carrying FRESH water counts — a dab's worth, not the
     // thin film of a drying front, or every drying wash blistered into
@@ -535,10 +584,22 @@ void main() {
   // Mass-conserving: the damp sheet GIVES UP water to the surface, it does
   // not invent it. (An additive term here made saturated paper a perpetual
   // water source, so a wash could never finish drying.)
+  // how wet the cell's surroundings are: the 3x3 mean of the wet mask,
+  // for the transport pass's contact line (see pin() there) and for the
+  // backrun below
+  around += texture(uFlow, vUV + uTexel).w + texture(uFlow, vUV - uTexel).w
+          + texture(uFlow, vUV + vec2(uTexel.x, -uTexel.y)).w + texture(uFlow, vUV + vec2(-uTexel.x, uTexel.y)).w;
+  s.w = around / 9.0;
+  // A backrun is a front too. Opened cell by cell wherever wicking along a
+  // fibre had dampened the paper enough, it was the other way a run grew
+  // threads: the thread's own water sank into the dry sheet behind its
+  // tip and left wet islands marching ahead of the front. Same gate as the
+  // contact line: the surroundings have to be broadly wet already.
   float thresh = uBackrun * cap;
-  if (s.x > thresh && w < 0.6 && wetNbr > 0.7) {
-    float release = min(uDt * 0.15 * (s.x - thresh) + 0.002, s.x * 0.5);
-    w = max(w, 0.75);
+  float frontB = smoothstep(0.2, 0.34, s.w);
+  if (s.x > thresh && w < 0.6 && wetNbr > 0.7 && frontB > 0.0) {
+    float release = min(uDt * 0.15 * (s.x - thresh) + 0.002, s.x * 0.5) * frontB;
+    w = max(w, 0.75 * frontB);
     h += release;
     s.x -= release;
   }
@@ -622,9 +683,6 @@ uniform vec3 uPaperColor;
 uniform vec4 uMetal[${NP}];        // per-channel: 0 watercolor, 1 metallic
 uniform vec3 uMetalCol[${NP * 4}]; // each metal's own reflectance colour
 uniform float uWetView; // 1 = overlay wet/satin/damp stages
-// The screen is a view onto the sheet: xy scales screen uv to sheet uv, zw
-// is the sheet uv under the centre of the screen.
-uniform vec4 uView;
 out vec4 frag;
 
 float mhash(vec2 p) {
@@ -650,14 +708,9 @@ float depTotal(vec2 uv) {
 }
 
 void main() {
-  vec2 uv = (vUV - 0.5) * uView.xy + uView.zw;
-  // off the sheet: the desk, with the paper's shadow on it
-  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
-    float outside = max(max(-uv.x, uv.x - 1.0), max(-uv.y, uv.y - 1.0));
-    float shade = 1.0 - 0.35 * (1.0 - smoothstep(0.0, 0.035, outside));
-    frag = vec4(vec3(0.17, 0.16, 0.15) * shade, 1.0);
-    return;
-  }
+  // the sheet is shaded at its own resolution; the blit puts the view of
+  // it on the screen
+  vec2 uv = vUV;
   vec4 f = texture(uFlow, uv);
   vec4 s = texture(uSat, uv);
   vec4 pap = texture(uPaper, uv);
@@ -791,6 +844,26 @@ ${RP.map((i) => `  {
 // minority of its cells, jitter each surviving grain inside its cell and
 // give it a random radius. The 3x3 neighbourhood scan lets grains from
 // adjacent cells overlap into clusters.
+// ----------------------------------------------------------------- blit ----
+// The screen is a view onto the sheet: uView.xy scales screen uv to sheet
+// uv, zw is the sheet uv under the centre of the screen. Off the sheet lies
+// the desk, with the paper's shadow on it.
+SHADERS.blit = `#version 300 es
+${COMMON}
+uniform sampler2D uFrame;
+uniform vec4 uView;
+out vec4 frag;
+void main() {
+  vec2 uv = (vUV - 0.5) * uView.xy + uView.zw;
+  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
+    float outside = max(max(-uv.x, uv.x - 1.0), max(-uv.y, uv.y - 1.0));
+    float shade = 1.0 - 0.35 * (1.0 - smoothstep(0.0, 0.035, outside));
+    frag = vec4(vec3(0.17, 0.16, 0.15) * shade, 1.0);
+    return;
+  }
+  frag = texture(uFrame, uv);
+}`;
+
 SHADERS.salt = `#version 300 es
 ${COMMON}
 uniform sampler2D uSat;

@@ -48,11 +48,20 @@ class WatercolorSim {
     // settling itself stalled. The drying code had hit the same floor and
     // been pulsed around it; the clean answer is the extra 16 bits.
     const half = !!opts.half || /[?&]half=1/.test(location.search); // force the fallback, for testing
-    this.texFormat = extF && extLin && !half ? gl.RGBA32F : gl.RGBA16F;
+    this.texFormat = extF && !half ? gl.RGBA32F : gl.RGBA16F;
     this._fullFloat = this.texFormat === gl.RGBA32F;
+    // Apple GPUs render to full floats but will not FILTER them (no
+    // OES_texture_float_linear), and full floats used to be refused for that
+    // alone, so every iPhone and iPad ran the half-float engine. Nothing in
+    // the simulation needs the filter: every pass reads at texel centres.
+    // Only the picture did, and the picture is now drawn at the grid's own
+    // resolution and magnified from an ordinary 8-bit texture. So: full
+    // floats, sampled nearest.
+    const nearest = /[?&]nearest=1/.test(location.search); // test the Apple path on a desktop
+    this._stateFilter = (this._fullFloat && !extLin) || nearest ? gl.NEAREST : gl.LINEAR;
     // what the device offered, for the session log and the settings panel
     this.gpu = {
-      format: this._fullFloat ? 'RGBA32F' : 'RGBA16F',
+      format: this._fullFloat ? 'RGBA32F' : 'RGBA16F', filter: this._stateFilter === gl.NEAREST ? 'nearest' : 'linear',
       colorBufferFloat: !!extF, colorBufferHalfFloat: !!extHF, floatLinear: !!extLin,
       maxAttach: gl.getParameter(gl.MAX_COLOR_ATTACHMENTS),
       renderer: (() => { const d = gl.getExtension('WEBGL_debug_renderer_info'); return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : null; })(),
@@ -222,7 +231,7 @@ class WatercolorSim {
 
   _initPrograms() {
     this.progs = {};
-    const names = ['paper', 'splat', 'velocity', 'height', 'moisture', 'render', 'salt', 'probe', 'diff', 'clear', 'copy'];
+    const names = ['paper', 'splat', 'velocity', 'height', 'moisture', 'render', 'blit', 'salt', 'probe', 'diff', 'clear', 'copy'];
     // the merged transfer shader declares 2*PIG_TEXTURES outputs, which does
     // not even compile on a device without the attachments for it
     names.push(...(this.mergedTransfer ? ['transferBoth'] : ['transferSusp', 'transferDep']));
@@ -236,6 +245,23 @@ class WatercolorSim {
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texStorage2D(gl.TEXTURE_2D, 1, this.texFormat, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, this._stateFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, this._stateFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return tex;
+  }
+
+  // The finished picture at grid resolution: 8-bit, filterable everywhere,
+  // and magnified onto the screen by the blit. Shading the sheet once per
+  // grid cell instead of once per device pixel is also a 4-9x saving on a
+  // retina screen, where the heaviest shader in the app used to run per
+  // device pixel.
+  _makeFrameTexture(w, h) {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -333,6 +359,8 @@ class WatercolorSim {
     if (this._pre) { for (const t of this._pre) gl.deleteTexture(t); this._pre = null; }
     if (!old && this.paperTex) gl.deleteTexture(this.paperTex);
     this.paperTex = this._makeTexture(w, h);
+    if (this.frameTex) gl.deleteTexture(this.frameTex);
+    this.frameTex = this._makeFrameTexture(w, h);
     if (!this.fbo) this.fbo = gl.createFramebuffer();
 
     if (old) {
@@ -1088,7 +1116,7 @@ class WatercolorSim {
 
       // 2. transport: water continuity and the pigment riding it
       this._bindOutputs([this.flow.write, ...this.susp.map((pr) => pr.write)]);
-      p = this._use('height', [['uFlow', this.flow.read], ['uSat', this.sat.read], ...this._suspInputs()]);
+      p = this._use('height', [['uFlow', this.flow.read], ['uSat', this.sat.read], ['uPaper', this.paperTex], ...this._suspInputs()]);
       gl.uniform1f(p.uniforms.uSmooth, P.smooth);
       gl.uniform1f(p.uniforms.uGrav, P.grav);
       gl.uniform1f(p.uniforms.uPigDiff, P.pigDiff);
@@ -1156,8 +1184,8 @@ class WatercolorSim {
 
   render() {
     const gl = this.gl;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    // 1. shade the sheet, once per grid cell
+    this._bindOutputs([this.frameTex]);
     const p = this._use('render', [
       ['uFlow', this.flow.read], ['uSat', this.sat.read], ['uPaper', this.paperTex],
       ...this._suspInputs(), ...this._depInputs(),
@@ -1181,8 +1209,13 @@ class WatercolorSim {
     gl.uniform4fv(p.uniforms.uGamma, this._pigParams.gamma);
     gl.uniform4fv(p.uniforms.uGrain, this._pigParams.grain);
     gl.uniform1f(p.uniforms.uWetView, this.wetView ? 1 : 0);
+    this._draw();
+    // 2. put the view of it on the screen
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    const b = this._use('blit', [['uFrame', this.frameTex]]);
     const v = this.view || { zoom: 1, cx: this.sheetW / 2, cy: this.sheetH / 2 };
-    gl.uniform4f(p.uniforms.uView,
+    gl.uniform4f(b.uniforms.uView,
       this.cssW / (v.zoom * this.sheetW), this.cssH / (v.zoom * this.sheetH),
       v.cx / this.sheetW, 1 - v.cy / this.sheetH);
     this._draw();
