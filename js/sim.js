@@ -140,6 +140,7 @@ class WatercolorSim {
                           // `absorb`, or the paper can never become damp
                           // and there is no damp stage and no backruns
       dryScale: 1.0,    // user drying-speed control
+      satBoost: 1,      // extra drying of the damp paper (the Dry button)
       wetThresh: 0.0008,
       wick: 0.15,       // capillary diffusion rate
       wickThresh: 0.18,
@@ -1121,7 +1122,14 @@ class WatercolorSim {
       gl.uniform1f(p.uniforms.uGrav, P.grav);
       gl.uniform1f(p.uniforms.uPigDiff, P.pigDiff);
       gl.uniform1f(p.uniforms.uSaltPush, P.saltPush);
-      gl.uniform2f(p.uniforms.uPin, P.pinLo, P.pinHi);
+      // A bead breaks onto dry paper when the slope's pull on it beats the
+      // grip of its edge, so on a gentle slope it has to be deeper first:
+      // the thresholds scale with the tilt below the reference of 0.2 (the
+      // same `grip` the velocity pass uses). Flat, with no tilt, unchanged.
+      const tl = Math.hypot(P.tilt[0], P.tilt[1]);
+      const grip = tl > 1e-4 ? Math.min(1.5, Math.max(0.35, tl / 0.2)) : 1;
+      gl.uniform2f(p.uniforms.uPin, P.pinLo / grip, P.pinHi / grip);
+      gl.uniform1f(p.uniforms.uTiltGrip, Math.min(1, tl / 0.2));
       this._ensurePigParams();
       gl.uniform4fv(p.uniforms.uMob, this._pigParams.mob);
       this._draw();
@@ -1143,7 +1151,9 @@ class WatercolorSim {
       gl.uniform1f(p.uniforms.uRunAbsorb, P.runAbsorb);
       gl.uniform2f(p.uniforms.uTilt, P.tilt[0], P.tilt[1]);
       gl.uniform1f(p.uniforms.uMaxSpeed, P.maxSpeed);
-      gl.uniform1f(p.uniforms.uSatEvap, P.satEvap * dry);
+      // satBoost: the Dry button's hair dryer dries the damp paper too, which
+      // at the ordinary rate outlasts the film by a minute
+      gl.uniform1f(p.uniforms.uSatEvap, P.satEvap * dry * (P.satBoost || 1));
       gl.uniform1f(p.uniforms.uWetThresh, P.wetThresh);
       gl.uniform1f(p.uniforms.uWick, P.wick);
       gl.uniform1f(p.uniforms.uWickThresh, P.wickThresh);

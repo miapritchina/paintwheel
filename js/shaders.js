@@ -291,7 +291,15 @@ void main() {
   // sheet drank the gaps dry). Fingers come from the contact line instead:
   // the transport pass lets the front through sooner where the sheet's
   // grain is open.
-  target += uTilt * smoothstep(0.025, 0.1, h);
+  //
+  // And how deep a film has to be before it slides at all depends on the
+  // slope: a gentle slope holds a film that a steep one sends. Without
+  // this the strength set only the speed, and a wash at low strength ran
+  // as far as at high (the volume decides the distance, not the speed).
+  // grip: 1 at a tilt of 0.2 (default strength, the device held at about
+  // fifty degrees); below that a film must be proportionally deeper.
+  float grip = clamp(length(uTilt) / 0.2, 0.35, 1.5);
+  target += uTilt * smoothstep(0.025, 0.1, h * grip);
 
   vec2 vel = mix(target, f.yz, uInertia);
   vel *= w * smoothstep(0.0003, 0.004, h);
@@ -337,6 +345,7 @@ ${RP.map((i) => `layout(location=${i + 1}) out vec4 oSusp${i};`).join('\n')}
 // a dry one only what a film deeper than the capillary barrier can send
 uniform sampler2D uPaper;
 uniform vec2 uPin; // film depth at which a face into dry paper opens: from, to
+uniform float uTiltGrip; // how much a slope drives the edge: 0 flat, 1 at a tilt of 0.2
 // A front advances as a front. Water leaving a stroke for dry paper used
 // to go one cell at a time along whichever row the tilt pointed down, and
 // a run was a comb of single-texel trickles. Surface tension will not
@@ -356,8 +365,19 @@ float pin(float hUpwind, float wDest, float aroundDest, float grainDest) {
   if (uPin.y <= 0.0) return 1.0;
   // a straight front has three of the nine wet (0.33), the tip of a
   // two-cell thread two (0.22): the gate sits between them
-  float front = smoothstep(0.2, 0.34, aroundDest);
+  // (two-cell threads no longer pass at all: at 0.2 they did, partly,
+  // and a tilted run frayed into one- and two-cell roots)
+  float front = smoothstep(0.25, 0.34, aroundDest);
   float ease = 0.75 + 0.5 * grainDest;
+  // Surface tension shapes a creeping edge. With nothing pulling it, the
+  // edge advances into a notch (more of its 3x3 wet than a flat edge's
+  // three) and holds where it is flat. It used to advance wherever it was
+  // flat or notched, so a pooled scribble crept until its outline was
+  // convex: a polygon with ruler-straight sides joining the tips of the
+  // strokes. A slope drives the downhill edge as before (uTiltGrip 1 at
+  // the reference tilt, 0 flat).
+  float shape = clamp(0.55 + 1.6 * (aroundDest - 0.33), 0.2, 1.4);
+  ease *= mix(shape, 1.0, uTiltGrip);
   // A cell the sheet drank dry in the middle of a run is not a contact
   // line: with wet film all round it, the film closes over it. Without
   // this the hole was permanent (nothing of ordinary depth could cross
@@ -404,7 +424,12 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);
   float kR = uR > 0.0 ? pin(f.x, fr.w, aR, qR) : pin(fr.x, f.w, aC, qC);
   float kL = uL > 0.0 ? pin(fl.x, f.w, aC, qC) : pin(f.x, fl.w, aL, qL);
   float kT = vT > 0.0 ? pin(f.x, ft.w, aT, qT) : pin(ft.x, f.w, aC, qC);
-  float kB = vB > 0.0 ? pin(fb.x, f.w, aB, qB) : pin(f.x, fb.w, aC, qC);
+  // (the destination's surroundings and grain go with the destination: kB
+  // had them swapped, so water leaving a cell downward was gated by the
+  // giver's surroundings while the cell below gated it by its own, the two
+  // disagreed at every bead held above dry paper, and the water and pigment
+  // in between were destroyed — a tilted wash lost a quarter of its water)
+  float kB = vB > 0.0 ? pin(fb.x, f.w, aC, qC) : pin(f.x, fb.w, aB, qB);
   float fluxR = (uR > 0.0 ? f.x * uR : fr.x * uR) * kR;
   float fluxL = (uL > 0.0 ? fl.x * uL : f.x * uL) * kL;
   float fluxT = (vT > 0.0 ? f.x * vT : ft.x * vT) * kT;

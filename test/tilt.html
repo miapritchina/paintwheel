@@ -155,7 +155,9 @@ function measure() {
       }
       widest /= sx;
     }
-    return { ran: Math.round(below), threads, widest: Math.round(widest) };
+    let colPig = 0;
+    for (let j = 0; j < sh; j++) for (let i = i0; i < i1; i++) colPig += pig(i, j);
+    return { ran: Math.round(below), threads, widest: Math.round(widest), pig: colPig };
   });
   return { pigTotal, water, held, cols: out };
 }
@@ -193,7 +195,8 @@ async function paint() {
     sim.params.tilt = [0, 0];
     paintMarks();
     sim.render();
-    const before = measure().pigTotal;
+    const m0 = measure();
+    const before = m0.pigTotal;
     sim.params.tilt = tiltFor(a);
     const frames = [];
     let t = 0;
@@ -203,14 +206,15 @@ async function paint() {
       frames.push([label, await createImageBitmap(cv)]);
       const m = measure();
       trace.push(`${a}deg ${label}: ` + m.cols.map((c, i) => `${COLS[i].name} ran ${c.ran}px threads ${c.threads} widest ${c.widest}px`).join(' | ')
-        + `  film ${m.water.toFixed(1)} in paper ${m.held.toFixed(1)}`);
+        + `  film ${m.water.toFixed(1)} in paper ${m.held.toFixed(1)} pigment ${(100 * (m.pigTotal / before - 1)).toFixed(2)}%`);
     }
     dryOut();
     sim.render();
     frames.push(['dry', await createImageBitmap(cv)]);
     const m = measure();
     trace.push(`${a}deg dry: ` + m.cols.map((c, i) => `${COLS[i].name} ran ${c.ran}px threads ${c.threads}`).join(' | ')
-      + `  pigment ${before.toFixed(0)} -> ${m.pigTotal.toFixed(0)} (${(100 * (m.pigTotal / before - 1)).toFixed(2)}%)`);
+      + `  pigment ${before.toFixed(0)} -> ${m.pigTotal.toFixed(0)} (${(100 * (m.pigTotal / before - 1)).toFixed(2)}%)`
+      + '  per mark: ' + m.cols.map((c, i) => `${(100 * (c.pig / m0.cols[i].pig - 1)).toFixed(1)}%`).join(' '));
     // 2 x 2 at half size
     g.fillStyle = '#23242a'; g.fillRect(0, 0, W, H);
     frames.forEach(([label, bmp], i) => {
