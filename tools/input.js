@@ -7,7 +7,8 @@
 // local, undo is deep and exact, the brush refills on lift, pressure drives
 // flow, tilt stretches the footprint, fingers navigate once a Pencil has
 // been seen, a dab lands under the pen at any zoom, the painting survives a
-// rotation and a change of detail, a hold on a pan solos its colour. Needs
+// rotation and a change of detail, a hold on a pan solos its colour, tilt
+// runs the water to the lowest edge. Needs
 // a static server on the repo root, as tools/tells.js does.
 'use strict';
 const { launch } = require('./browser');
@@ -298,6 +299,31 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
     return { dep: s, penSeen: window.__input.penSeen };
   });
   check('a finger paints until a Pencil shows up', r.dep > 0 && !r.penSeen, `deposits ${r.dep}`);
+
+  // Tilt runs to the physically lowest edge. A phone held still in the hand
+  // at 60 degrees must run the water down the screen; a few degrees of
+  // wobble must not swing it sideways; an iPad turned either way in
+  // landscape must do the same; flat on a table, nothing runs.
+  await page.goto(`http://127.0.0.1:${PORT}/index.html?t=${Date.now()}`);
+  await page.waitForFunction(() => window.sim && window.brush);
+  r = await page.evaluate(async () => {
+    const dir = (beta, gamma, angle) => {
+      Object.defineProperty(screen.orientation, 'angle', { value: angle, configurable: true });
+      for (let i = 0; i < 80; i++) window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: 0, beta, gamma }));
+      const t = sim.params.tilt;
+      return { deg: Math.round(Math.atan2(t[0], -t[1]) * 180 / Math.PI), mag: Math.hypot(t[0], t[1]) };
+    };
+    document.getElementById('tilt').click();
+    await new Promise((res) => setTimeout(res, 50));
+    const out = { held: dir(60, 0, 0), wobble: dir(57, 10, 0), leanBack: dir(45, 0, 0),
+                  land90: dir(0, -60, 90), land270: dir(0, 60, 270), flat: dir(2, 2, 0) };
+    document.getElementById('tilt').click();
+    return out;
+  });
+  check('tilt runs the water to the lowest edge of the screen',
+    Math.abs(r.held.deg) <= 2 && r.held.mag > 0.1 && Math.abs(r.wobble.deg) <= 12 && Math.abs(r.leanBack.deg) <= 2
+      && Math.abs(r.land90.deg) <= 2 && Math.abs(r.land270.deg) <= 2 && r.flat.mag === 0,
+    `deg from down: held ${r.held.deg}, wobble ${r.wobble.deg}, leaning back ${r.leanBack.deg}, landscape ${r.land90.deg}/${r.land270.deg}; flat ${r.flat.mag}`);
 
   if (errors.length) { console.log('\nPAGE ERRORS:'); for (const e of errors.slice(0, 10)) console.log('  ' + e); }
   const pass = results.filter((x) => x[1]).length;

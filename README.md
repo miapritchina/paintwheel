@@ -582,10 +582,12 @@ way to report "this didn't behave like real watercolor".
   used to fail without a word; each now says which one it was and what to do
   about it, and the button does not light up unless readings are actually
   arriving. — thick wet paint
-  runs downhill and fingers along paper fibres (damp washes hold). The
-  angle you are holding the device at when you switch it on is taken as
-  level, so you can work at whatever angle is comfortable rather than flat
-  on a table, and the reading is rotated into screen space so it points
+  runs downhill and fingers along paper fibres (damp washes hold). It runs
+  toward whichever edge of the screen is physically lowest, as on a real
+  board. (It used to take the angle the device was held at when tilt went
+  on as level, which subtracted the very slope a hand-held sheet has: held
+  still, nothing ran; leaning back ran the water up the screen; and the
+  hand's roll was all that was left, so it ran sideways.) The reading is rotated into screen space so it points
   downhill on an iPad held sideways too. The tilt is taken from where
   gravity points in the device's frame, not from the beta and gamma
   angles themselves: gamma is undefined with the phone held upright in

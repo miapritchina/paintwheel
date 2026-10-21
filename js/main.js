@@ -736,13 +736,17 @@
   // Two things the naive version got wrong. beta/gamma are angles of the
   // DEVICE, and on an iPad held in landscape the screen is rotated a quarter
   // turn inside it — so downhill came out sideways. The vector is rotated by
-  // the screen angle into screen space. And nobody holds a tablet like a
-  // sheet of paper on a table: enabling tilt now takes whatever angle you
-  // are holding at that moment as level, and only movement away from it runs
-  // the paint.
+  // the screen angle into screen space.
+  //
+  // Downhill is real downhill: the water runs toward whichever edge of the
+  // screen is physically lowest, as hard as the sheet's slope. It used to be
+  // measured from however the device was held when tilt went on, which
+  // subtracted exactly the slope a hand-held sheet has — held still at 60
+  // degrees nothing ran at all, leaning back ran the water UP the screen,
+  // and the only thing left to drive it was the hand's roll, so it ran
+  // sideways. Measured with synthetic readings before the change.
   const tiltBtn = document.getElementById('tilt');
   let tiltOn = false;
-  let tiltRef = null;
 
   function screenAngle() {
     const a = (window.screen && screen.orientation && screen.orientation.angle);
@@ -753,8 +757,8 @@
   // A hand is never still, and the sensor jitters by a degree on its own.
   // Taken raw, every wobble of the phone ran the water a different way
   // ("left, top, left" with the phone just held). Readings are smoothed,
-  // and the first few degrees away from level do nothing at all: a sheet
-  // has to be tilted on purpose before a wash runs.
+  // and the first few degrees away from flat do nothing at all: a sheet
+  // on a table has to be tilted on purpose before a wash runs.
   const TILT_DEAD = 5; // degrees
   let tiltSmooth = null;
 
@@ -770,30 +774,13 @@
     const b = ((e.beta || 0) * Math.PI) / 180, g = ((e.gamma || 0) * Math.PI) / 180;
     return [Math.sin(g) * Math.cos(b), -Math.sin(b), -Math.cos(g) * Math.cos(b)];
   }
-  // Rotate v by the rotation that carries `from` onto straight down, so a
-  // tilt is measured from however the device was held when tilt went on.
-  function relativeTo(v, from) {
-    const e = [0, 0, -1];
-    const ax = [from[1] * e[2] - from[2] * e[1], from[2] * e[0] - from[0] * e[2], from[0] * e[1] - from[1] * e[0]];
-    const sn = Math.hypot(ax[0], ax[1], ax[2]);
-    const cs = Math.max(-1, Math.min(1, from[0] * e[0] + from[1] * e[1] + from[2] * e[2]));
-    if (sn < 1e-6) return cs > 0 ? v : [-v[0], v[1], -v[2]];
-    const k = [ax[0] / sn, ax[1] / sn, ax[2] / sn];
-    // Rodrigues: v cos + (k x v) sin + k (k.v)(1 - cos)
-    const kv = [k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]];
-    const kd = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
-    return [0, 1, 2].map((i) => v[i] * cs + kv[i] * sn + k[i] * kd * (1 - cs));
-  }
-
   function onOrient(e) {
     if (!tiltOn) return;
     if (e.beta == null && e.gamma == null) return; // a reading with no data
     tiltGotEvent = true;
     const down = downVector(e);
-    if (!tiltRef) tiltRef = down;
-    const rel = relativeTo(down, tiltRef);
-    // in the screen plane: how far down points sideways, as sin(tilt)
-    const raw = [rel[0], rel[1]];
+    // in the screen plane: where down points along the sheet, as sin(slope)
+    const raw = [down[0], down[1]];
     if (!tiltSmooth) tiltSmooth = raw;
     else {
       tiltSmooth[0] += 0.12 * (raw[0] - tiltSmooth[0]);
@@ -818,7 +805,7 @@
     // sheet v points up the screen, like device y
     sim.params.tilt = [sx * k, sy * k];
     if (Math.abs(sx) + Math.abs(sy) > 0.01) sim.markDirty();
-    window.__tiltDebug = { beta: e.beta, gamma: e.gamma, down, rel, angleDeg: ang,
+    window.__tiltDebug = { beta: e.beta, gamma: e.gamma, down, angleDeg: ang,
                            screenAngle: (a * 180) / Math.PI, tilt: sim.params.tilt };
   }
 
@@ -831,7 +818,6 @@
 
   function stopTilt(msg) {
     tiltOn = false;
-    tiltRef = null;
     tiltSmooth = null;
     clearTimeout(tiltWatchdog);
     window.removeEventListener('deviceorientation', onOrient);
@@ -868,13 +854,12 @@
     }
 
     tiltOn = true;
-    tiltRef = null; // however you are holding it right now IS level
     tiltSmooth = null;
     tiltGotEvent = false;
     tiltBtn.classList.add('on');
     window.addEventListener('deviceorientation', onOrient);
     LOGBOOK.log('tiltMode', { on: true, screenAngle: Math.round((screenAngle() * 180) / Math.PI) });
-    updateBrushView('Tilt on — the angle you are holding now is level');
+    updateBrushView('Tilt on — paint runs toward the lowest edge. Lay the device flat to stop it.');
     // granted, listening, and still nothing arriving is its own failure
     clearTimeout(tiltWatchdog);
     tiltWatchdog = setTimeout(() => {
