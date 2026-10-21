@@ -369,9 +369,9 @@ glass** and a **sponge**. The brush is stateful — it carries water and a
 
 ## Layout
 
-The bar is built to stay out of the way — on an iPhone it takes about a
-fifth of the screen, on a landscape iPad about an eighth, and nothing wraps
-to a second line at any size. Safe areas are respected: the full-screen panels start below the notch (the
+The bar is built to stay out of the way — on an iPad held sideways it takes
+a tenth of the screen, on an upright iPhone about a fifth, and nothing wraps
+at any size. Safe areas are respected: the full-screen panels start below the notch (the
 paint box's first row was hidden under the status bar), and the bar ends
 flush with the screen with just the home-indicator clearance below the last
 row. An installed PWA may be *letterboxed* — its web view stops short of the
@@ -385,14 +385,33 @@ reads as part of the bar instead of a black void. The insets are held in
 `--safe-top` / `--safe-bottom` so both layouts can be checked on a desktop
 browser, where `env()` is always zero.
 
-The pans sit **beside the mixing plate** — in life they are one paint box,
-and dip-then-mix is a constant back-and-forth — as two rows of four, which
-also keeps them a comfortable size. Then the brush row, then Size / Paper /
-Paint box / ⚙, then the tools. The status line hangs on a tab
-above the bar so it costs no height, and a pan's tap target is its whole
-cell including the name label, so the pans can stay short without becoming
-hard to hit. Occasional actions (Clear, Tilt, Demo, Save, Log, Reset) live
-in ⚙ rather than taking two rows of the bar.
+The bar is **an open travel tin of watercolours**. Black enamel outside, a
+white enamel tray inside — deliberately cooler than the paper, so the tray
+never reads as a strip of the sheet. The tray holds what the brush touches:
+the pans in their white half-pan cups (each showing its dried mass tone, as
+real cakes of paint do), the **mixing well**, where the current mix is drawn
+as a dried stroke with its consistency — tea, coffee, milk, cream, butter —
+stamped under it, the **Rinse** jar, and three labelled grooves for Paint,
+Water and Size; the Paint knob takes the colour of the mix. The tools are
+stamped along the lid side as line icons with a caption each: Salt, Wet,
+Dry, Tilt, then Undo and Fit, then Box and Settings. An active tool turns
+brass. Labels use Avenir Next Condensed, which every Apple device has, so
+the app needs no web font and stays fully offline.
+
+Three arrangements, by the shape of the screen:
+
+- **Wide** (landscape, 1100 px and up — every iPad sideways): one row, tray
+  on the left, lid on the right.
+- **Upright** (portrait): pans on top, the brush row under them, the lid
+  along the bottom.
+- **Short and sideways** (a phone in landscape): the lid stands up along
+  the right edge, as an opened tin's does, and the tray takes the bottom
+  edge — one flat row cannot fit beside a phone's notch.
+
+The status line hangs on an enamel tab above the tin, so it costs no height.
+A pan's tap target is its whole cell including the name. Paper, Demo, Save,
+Log, Clear and Reset live in Settings; Tilt is in the tin, since it is used
+mid-painting.
 
 ## Performance
 

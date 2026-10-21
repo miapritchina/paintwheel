@@ -337,10 +337,10 @@
 
   function rebuildPans() {
     paletteEl.innerHTML = '';
-    // as many columns as pans up to six, so a small palette fills the row
-    // with fat pans instead of leaving empty grid cells beside them
-    const cols = Math.max(1, Math.min(6, PANS.length));
-    paletteEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 84px))`;
+    // The stylesheet decides the layout: up to six to a row in the narrow
+    // tin, the whole box in one row where the tin is wide.
+    paletteEl.style.setProperty('--n', String(Math.max(1, PANS.length)));
+    paletteEl.style.setProperty('--n6', String(Math.max(1, Math.min(6, PANS.length))));
     PANS.forEach((pan, i) => {
       const p = pan.paint;
       const wrap = document.createElement('div');
@@ -371,7 +371,7 @@
   // move the water slider — the glass up, the sponge down — by swirling on a
   // button instead of dragging the control that is already on screen. Once
   // water stopped being tangled up with paint they were two spellings of the
-  // same knob, so they are gone. 🌀 is the one brush action left that the
+  // same knob, so they are gone. Rinse is the one brush action left that the
   // sliders cannot express.
   document.getElementById('clean').addEventListener('pointerdown', () => {
     // Rinse takes the colour off the hairs AND out of the pans. Water is the
@@ -836,7 +836,7 @@
     clearTimeout(tiltWatchdog);
     window.removeEventListener('deviceorientation', onOrient);
     sim.params.tilt = [0, 0];
-    tiltBtn.style.background = '';
+    tiltBtn.classList.remove('on');
     if (msg) updateBrushView(msg);
   }
 
@@ -871,7 +871,7 @@
     tiltRef = null; // however you are holding it right now IS level
     tiltSmooth = null;
     tiltGotEvent = false;
-    tiltBtn.style.background = 'rgba(120,180,255,0.35)';
+    tiltBtn.classList.add('on');
     window.addEventListener('deviceorientation', onOrient);
     LOGBOOK.log('tiltMode', { on: true, screenAngle: Math.round((screenAngle() * 180) / Math.PI) });
     updateBrushView('Tilt on — the angle you are holding now is level');
@@ -899,7 +899,7 @@
   function setMode(m, msg) {
     mode = m;
     for (const [key, id] of Object.entries(MODE_BTN)) {
-      document.getElementById(id).style.background = m === key ? 'rgba(255,255,255,0.4)' : '';
+      document.getElementById(id).classList.toggle('on', m === key);
     }
     brushcursor.style.borderStyle = m === 'brush' ? 'solid' : 'dashed';
     if (msg === null) updateBrushView(); // keep whatever text the tool set
@@ -943,7 +943,7 @@
   wetviewBtn.addEventListener('click', () => {
     sim.wetView = !sim.wetView;
     sim.markDirty(); // the picture changes even though the water does not
-    wetviewBtn.style.background = sim.wetView ? 'rgba(120,180,255,0.35)' : '';
+    wetviewBtn.classList.toggle('on', !!sim.wetView);
     updateBrushView(sim.wetView ? 'Wetness view: blue=wet, teal=satin, amber=damp' : undefined);
   });
 
@@ -1440,5 +1440,5 @@
   }
   requestAnimationFrame(frame);
   window.__uv = updateBrushView; // for the console and automated tests
-  updateBrushView('Tap a pan for colour. 🎨 is how much paint, 💧 how much water — water moves the paint, it never darkens it. 🌀 rinses.');
+  updateBrushView('Tap a pan for colour. Paint sets how much is on the brush, Water how wet it is. Water moves paint but never darkens it.');
 })();

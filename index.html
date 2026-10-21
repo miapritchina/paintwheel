@@ -5,25 +5,39 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#201e1b">
+<meta name="theme-color" content="#17181a">
+<meta name="generated-by" content="Claude" data-source="paint-box UI redesign request" data-purpose="toolbar and panels restyled as an enamel watercolour tin">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
 <title>Paintwheel — Wet Watercolor</title>
 <style>
+  /* The bar is an open travel tin of watercolours: black enamel outside, a
+     cool white enamel tray inside holding the pans, the mixing well and the
+     brush controls, and the tools along the lid side. The enamel white is
+     deliberately cooler than the paper, so the tray never reads as a strip
+     of the sheet. */
   :root {
-    --panel-bg: rgba(32, 30, 27, 0.88);
+    --enamel: #17181a;        /* tin, outside */
+    --enamel-hi: #2b2c30;     /* light catching the rolled rim */
+    --porcelain: #f3f5f3;     /* white enamel tray, cooler than the paper */
+    --porcelain-lo: #dde1de;  /* enamel in shadow: grooves, wells */
+    --ink: #262523;           /* print on the tray */
+    --stamp: #c8c2b6;         /* embossed lettering on the enamel */
+    --brass: #b8925a;         /* hardware: what is switched on */
+    --label: "Avenir Next Condensed", "Avenir Next", "Helvetica Neue", "Arial Narrow", sans-serif;
     --panel-fg: #f0ece6;
     /* Held as variables so they can be overridden to check the notch and
        home-indicator layouts on a desktop browser, where env() is all 0. */
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   /* The home-indicator strip below the layout viewport is painted with the
-     root background, so give it the bar's colour: it read as a black void
-     under the toolbar otherwise. */
-  html { background: #35322f; }
+     root background, so give it the tin's colour. */
+  html { background: var(--enamel); }
   html, body {
     width: 100%; height: 100%;
     overflow: hidden;
@@ -32,8 +46,6 @@
     touch-action: none;
     -webkit-user-select: none; user-select: none;
   }
-  /* dvh covers the whole screen where it is supported, so the bar sits on
-     the bottom edge rather than above a letterboxed strip */
   @supports (height: 100dvh) {
     html, body { height: 100dvh; }
   }
@@ -43,7 +55,6 @@
     touch-action: none;
     cursor: none;
   }
-  /* brush cursor ring showing current load */
   #brushcursor {
     position: absolute;
     pointer-events: none;
@@ -53,225 +64,351 @@
     display: none;
     z-index: 5;
   }
+  button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  .ic {
+    width: 22px; height: 22px;
+    fill: none; stroke: currentColor; stroke-width: 1.6;
+    stroke-linecap: round; stroke-linejoin: round;
+    flex: 0 0 auto;
+  }
+
+  /* ---------------------------------------------------------------- tin -- */
   #toolbar {
     position: absolute;
-    left: 0; right: 0;
-    bottom: 0;
-    padding: 8px 10px max(7px, var(--safe-bottom));
-    background: var(--panel-bg);
-    color: var(--panel-fg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    left: 0; right: 0; bottom: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 7px 8px max(6px, var(--safe-bottom));
+    background: linear-gradient(var(--enamel-hi), var(--enamel) 5px);
+    border-top: 1px solid #3a3b40;
+    color: var(--stamp);
+  }
+  #tray {
     display: flex;
     flex-direction: column;
     gap: 7px;
-    z-index: 10;
+    padding: 7px 9px 8px;
+    background: var(--porcelain);
+    color: var(--ink);
+    border-radius: 9px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.28), inset 0 -1px 0 rgba(255,255,255,0.7);
+  }
+
+  /* the pans: masstone cakes of paint, each in its white half-pan cup */
+  #workbench { display: flex; justify-content: center; min-width: 0; }
+  #palette {
+    --n: 4; --n6: 4;
+    display: grid;
+    grid-template-columns: repeat(var(--n6), minmax(0, 66px));
+    gap: 6px 7px;
+    justify-content: center;
+    width: 100%;
+  }
+  .panwrap {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px;
+    cursor: pointer;
+    min-width: 0;
+  }
+  .pan {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1.55;
+    border-radius: 4px;
+    border: 3px solid #fdfdfb;
+    box-shadow:
+      0 0 0 1px rgba(0,0,0,0.13),
+      0 1px 2px rgba(0,0,0,0.22),
+      inset 0 2px 4px rgba(0,0,0,0.5),
+      inset 0 -1px 1px rgba(255,255,255,0.18);
+    cursor: pointer;
+  }
+  .pan:active { transform: scale(0.94); }
+  .panwrap.inmix .pan { box-shadow: 0 0 0 2px var(--brass), 0 1px 2px rgba(0,0,0,0.22), inset 0 2px 4px rgba(0,0,0,0.5); }
+  .panparts {
+    position: absolute;
+    top: -8px; right: -8px;
+    min-width: 17px; height: 17px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background: var(--enamel);
+    color: #fff;
+    font: 600 10px/17px var(--label);
+    text-align: center;
+    display: none;
+  }
+  .panlabel {
+    font: 600 9px/1 var(--label);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: center;
+    color: var(--ink);
+    opacity: 0.72;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* the brush: the mixing well, the water jar, and three grooves */
+  #brushrow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+  #well {
+    position: relative;
+    flex: 0 0 132px;
+    height: 46px;
+    border-radius: 23px;
+    background: radial-gradient(120% 100% at 50% 30%, #fbfcfb 0%, var(--porcelain-lo) 100%);
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.22), 0 1px 0 rgba(255,255,255,0.9);
+    overflow: hidden;
   }
   /* The mix drawn as a dried stroke on the paper, rather than described.
      Hidden entirely when the brush is empty, so it costs nothing then. */
   #mixstroke {
     display: none;
-    width: 100%;
-    max-width: 420px;
-    height: 34px;
-    margin: 0 auto;
-    border-radius: 5px;
+    position: absolute;
+    left: 10px; right: 10px; top: 7px;
+    width: calc(100% - 20px);
+    height: 22px;
+    border-radius: 11px;
   }
   #mixstroke.on { display: block; }
-  /* the pans, and nothing else — the row used to share its width with a
-     mixing plate, then a recipe readout, then a preview swatch */
-  #workbench {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
-    justify-content: center;
-    /* capped, or twelve pans across the whole bar grow tall enough to cost
-       more height than the box they replaced */
-    max-width: 420px;
-    width: 100%;
-    margin: 0 auto;
-  }
-  /* Everything right of the plate stacks into one plate-high column. The
-     tools used to be a vertical stack, which made this row three buttons
-     tall and left a large void beside the plate. */
-  /* The pans sit beside the mixing plate: in life they are one paint box,
-     and dip-then-mix is a constant back-and-forth. */
-  #brushrow {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    max-width: 460px;
-    width: 100%;
-    margin: 0 auto;
-  }
-  #tools { flex: 0 0 auto; }
-  .panparts {
+  #consistency {
     position: absolute;
-    top: 2px; right: 3px;
-    font-size: 10px; font-weight: 600;
-    color: #fff;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.9);
-    display: none;
+    left: 0; right: 0; bottom: 4px;
+    font: 600 9px/1 var(--label);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: center;
+    color: var(--ink);
+    opacity: 0.6;
   }
-  .panwrap.inmix .pan { outline: 2px solid rgba(255,255,255,0.75); }
-
-  #tools {
-    display: flex;
-    flex-direction: row;
-    gap: 5px;
-  }
+  #well:has(#mixstroke:not(.on)) #consistency { bottom: auto; top: 50%; transform: translateY(-50%); font-size: 10px; }
+  #tools { flex: 0 0 auto; display: flex; }
   .tool {
-    width: 42px;
-    height: 34px;
-    font-size: 18px;
-    background: rgba(255,255,255,0.10);
-    border: none; border-radius: 8px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    width: 46px; height: 46px;
+    border: none; border-radius: 9px;
+    background: transparent;
+    color: #2f5d86;
     cursor: pointer;
   }
-  .tool:active { background: rgba(255,255,255,0.3); }
-  /* brush tip indicator: colour blob + the three live brush sliders */
-  #brushwrap { display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
-  #brushsliders { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
-  .bsl { display: flex; align-items: center; gap: 4px; font-size: 11px; }
-  .bsl > span { width: 13px; text-align: center; opacity: 0.8; flex: 0 0 auto; }
-  .bsl input[type=range] { flex: 1 1 auto; width: auto; min-width: 0; }
-  #consistency { font-size: 9px; opacity: 0.7; flex: 0 0 auto; width: 48px; text-align: center; }
-  /* One row of everything that isn't the brush: sheet choices on the left,
-     modes and actions on the right. Two rows of buttons never earned the
-     height they cost. */
+  .tool span { font: 600 9px/1 var(--label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); opacity: 0.72; }
+  .tool:active { background: var(--porcelain-lo); }
+  #brushwrap { flex: 1 1 auto; min-width: 0; }
+  #brushsliders { display: flex; flex-direction: column; gap: 3px; }
+  .bsl { display: flex; align-items: center; gap: 8px; height: 15px; }
+  .bsl > span {
+    flex: 0 0 38px;
+    font: 600 9px/1 var(--label);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink);
+    opacity: 0.72;
+  }
+  /* grooves pressed into the enamel; the knob on Paint takes the mix's colour */
+  .bsl input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    flex: 1 1 auto; width: auto; min-width: 0;
+    height: 22px;
+    background: transparent;
+  }
+  .bsl input[type=range]::-webkit-slider-runnable-track {
+    height: 5px; border-radius: 3px;
+    background: var(--porcelain-lo);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+  }
+  .bsl input[type=range]::-moz-range-track {
+    height: 5px; border-radius: 3px;
+    background: var(--porcelain-lo);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+  }
+  .bsl input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 17px; height: 17px; margin-top: -6px;
+    border-radius: 50%;
+    background: var(--knob, var(--enamel));
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.35);
+  }
+  .bsl input[type=range]::-moz-range-thumb {
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    background: var(--knob, var(--enamel));
+    border: 2px solid #fff;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.35);
+  }
+  #paintload { --knob: var(--fill, #fff); }
+  #waterload { --knob: #8fb8d8; }
+
+  /* the lid side: tools stamped into the enamel */
   #actionrow {
     display: flex;
     align-items: center;
-    gap: 5px;
-    flex-wrap: wrap;
-    font-size: 11px;
-    max-width: 460px;
-    width: 100%;
-    margin: 0 auto;
-  }
-  #actionrow select { flex: 0 1 auto; min-width: 76px; }
-  #actionrow .flexgap { flex: 1 1 0; }
-  .ctl { display: flex; align-items: center; gap: 5px; }
-  input[type=range] { width: 70px; }
-  select {
-    background: rgba(255,255,255,0.12);
-    color: var(--panel-fg);
-    border: none; border-radius: 6px;
-    padding: 3px 5px;
-    font-size: 11px;
-  }
-  .btnrow { display: flex; gap: 4px; flex-wrap: wrap; }
-  button.small {
-    white-space: nowrap;
-    background: rgba(255,255,255,0.12);
-    color: var(--panel-fg);
-    border: none; border-radius: 7px;
-    padding: 4px 8px;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  button.small:active { background: rgba(255,255,255,0.28); }
-  #palette {
-    display: grid;
-    /* the column count follows the palette (JS sets it): four colours fill
-       the row as four fat pans instead of leaving a third of it dark */
-    grid-template-columns: repeat(6, minmax(0, 84px));
-    gap: 5px;
-    flex: 1 1 auto;
-    min-width: 0;
-    align-content: center;
-    justify-content: center;
-  }
-  /* twelve pans at most, two rows of six, at every size */
-  /* the whole wrapper is the tap target, label included — that buys back
-     touch area without costing the bar any height */
-  .panwrap {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
+    justify-content: space-between;
     gap: 2px;
+  }
+  .hinge { flex: 0 0 1px; align-self: stretch; margin: 6px 3px; background: #34353a; }
+  .lidbtn {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    height: 44px;
+    border: none; border-radius: 8px;
+    background: transparent;
+    color: var(--stamp);
     cursor: pointer;
   }
-  .pan {
-    position: relative;
-    aspect-ratio: 2.4;
-    border-radius: 6px;
-    border: 1px solid rgba(0,0,0,0.4);
-    box-shadow: inset 0 2px 5px rgba(0,0,0,0.45), inset 0 -1px 2px rgba(255,255,255,0.15);
-    cursor: pointer;
-    width: 100%;
-  }
-  .pan:active { transform: scale(0.93); }
-  .panlabel {
-    font-size: 7.5px;
-    text-align: center;
-    opacity: 0.75;
+  .lidbtn span { font: 600 9px/1 var(--label); letter-spacing: 0.08em; text-transform: uppercase; }
+  .lidbtn:active { background: rgba(255,255,255,0.08); }
+  .lidbtn.on { color: var(--brass); background: rgba(184,146,90,0.14); }
+
+  /* the status line: a narrow enamel tab above the tin, so it costs the tin
+     no height and stays readable against the painting */
+  #pigname {
+    position: absolute;
+    left: 10px; bottom: 100%;
+    max-width: calc(100% - 20px);
+    padding: 4px 10px 3px;
+    border-radius: 7px 7px 0 0;
+    background: var(--enamel);
+    color: var(--stamp);
+    font-size: 11.5px;
     white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
   }
-  /* paint box overlay: pick which paints occupy the 8 working pans */
-  /* Both overlays are fully opaque: at 98.5% the toolbar underneath ghosted
-     through as faint grey rectangles behind the settings. */
-  #boxpanel {
+  #pigname:empty { display: none; }
+
+  /* ---- wide (a tablet held sideways, a desktop): the tin lies flat along
+     the bottom edge, tray on the left, lid on the right, the whole box of
+     pans in one row ---- */
+  @media (orientation: landscape) and (min-width: 1100px) {
+    #toolbar { flex-direction: row; align-items: stretch; gap: 10px; padding: 7px 12px max(7px, var(--safe-bottom)); }
+    #tray { flex: 1 1 auto; flex-direction: row; align-items: center; gap: 12px; padding: 7px 12px; min-width: 0; }
+    #workbench { flex: 0 1 auto; min-width: 0; }
+    #palette { grid-template-columns: repeat(var(--n6), minmax(0, 60px)); }
+    #brushrow { flex: 1 1 360px; max-width: 520px; padding-left: 12px; border-left: 1px solid var(--porcelain-lo); }
+    #actionrow { flex: 0 1 auto; gap: 0; }
+    .lidbtn { flex: 0 0 auto; width: 50px; }
+  }
+  /* ---- short and sideways (a phone in landscape, a small window): the lid
+     stands up along the right edge, as an opened tin's does, and the tray
+     takes the bottom. One flat row would not fit beside a phone's notch. */
+  @media (orientation: landscape) and (max-width: 1099px) {
+    #toolbar {
+      flex-direction: row;
+      padding: 6px 8px max(5px, var(--safe-bottom)) max(8px, var(--safe-left));
+      right: calc(58px + var(--safe-right));
+    }
+    #tray { flex: 1 1 auto; flex-direction: row; align-items: center; gap: 10px; padding: 6px 10px; min-width: 0; }
+    #workbench { flex: 0 1 auto; min-width: 0; }
+    #palette { grid-template-columns: repeat(var(--n6), minmax(0, 52px)); gap: 5px 6px; }
+    .pan { aspect-ratio: 1.9; border-width: 2.5px; }
+    #brushrow { flex: 1 1 300px; min-width: 260px; padding-left: 10px; border-left: 1px solid var(--porcelain-lo); }
+    #well { flex-basis: 92px; height: 40px; }
+    #mixstroke { top: 5px; height: 20px; }
+    .tool { width: 40px; height: 40px; }
+    .bsl { height: 13px; }
+    #actionrow {
+      position: fixed;
+      top: 0; bottom: 0; right: 0;
+      width: calc(58px + var(--safe-right));
+      padding: max(6px, var(--safe-top)) var(--safe-right) max(6px, var(--safe-bottom)) 0;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0;
+      background: linear-gradient(90deg, var(--enamel-hi), var(--enamel) 5px);
+      border-left: 1px solid #3a3b40;
+      z-index: 10;
+    }
+    .lidbtn { flex: 0 1 44px; width: 58px; height: auto; min-height: 34px; }
+    .hinge { flex: 0 0 1px; align-self: center; width: 28px; margin: 4px 0; }
+  }
+  /* phones held upright: every row earns its height — shallower cups,
+     a slimmer well, a lower lid — so the tin costs no more of the screen
+     than the old bar did */
+  @media (orientation: portrait) {
+    #toolbar { gap: 4px; padding: 6px 7px max(4px, var(--safe-bottom)); }
+    #tray { gap: 5px; padding: 6px 8px; }
+    .pan { aspect-ratio: 2.05; border-width: 2.5px; }
+    #brushrow { gap: 6px; }
+    #well { flex-basis: 96px; height: 40px; }
+    #mixstroke { top: 5px; height: 20px; left: 8px; right: 8px; width: calc(100% - 16px); }
+    .tool { width: 40px; height: 40px; }
+    .bsl { height: 13px; }
+    .bsl > span { flex-basis: 34px; }
+    .lidbtn { height: 40px; gap: 2px; }
+  }
+  /* small phones: no captions under the brush controls' labels, slimmer cups */
+  @media (max-width: 380px) {
+    #well { flex-basis: 80px; }
+    .lidbtn span { font-size: 8px; }
+    .pan { border-width: 2px; }
+  }
+
+  /* -------------------------------------------------------------- panels -- */
+  #boxpanel, #setpanel {
     position: absolute;
     inset: 0;
-    background: rgb(20, 18, 16);
     z-index: 30;
     display: none;
     flex-direction: column;
-    gap: 10px;
-    padding: calc(14px + var(--safe-top)) 16px calc(14px + var(--safe-bottom));
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    color: var(--panel-fg);
-  }
-  #boxpanel.open, #setpanel.open { display: flex; }
-  #setpanel {
-    position: absolute;
-    inset: 0;
-    background: rgb(20, 18, 16);
-    z-index: 30;
-    display: none;
-    flex-direction: column;
+    align-items: center;
     gap: 12px;
     padding: calc(18px + var(--safe-top)) 16px calc(18px + var(--safe-bottom));
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    color: var(--panel-fg);
-    align-items: center;
+    background: var(--enamel);
+    color: var(--stamp);
   }
-  /* settings are grouped in carded sections, one theme per card */
+  #boxpanel.open, #setpanel.open { display: flex; }
+  .settitle {
+    font: 600 13px/1 var(--label);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--stamp);
+    padding: 4px 0 2px;
+  }
+  /* each settings group is a tray of the tin */
   .setsection {
-    width: 100%; max-width: 440px;
+    width: 100%; max-width: 460px;
     display: flex; flex-direction: column; gap: 10px;
-    padding: 12px 14px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
+    padding: 14px 16px;
+    background: var(--porcelain);
+    color: var(--ink);
+    border-radius: 10px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.25);
+    accent-color: #8a6a36;
   }
   .sethead {
-    font-size: 11px; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.09em;
-    opacity: 0.55;
+    font: 600 11px/1 var(--label);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.6;
   }
-  .setrow {
-    display: flex; align-items: center; gap: 10px;
-    width: 100%;
-    font-size: 13px;
-  }
+  .setrow { display: flex; align-items: center; gap: 10px; width: 100%; font-size: 14px; }
   .setrow > span:first-child { flex: 0 0 112px; }
   .setrow input[type=range] { flex: 1; width: auto; min-width: 0; }
   .setrow select { flex: 1 1 auto; min-width: 0; }
   .setnote {
     width: 100%;
-    font-size: 11px; opacity: 0.55; line-height: 1.4;
+    font-size: 12px; line-height: 1.4;
+    color: #5d5b57;
     margin-top: -6px; padding-left: 122px;
   }
   .setrow.check { gap: 8px; }
   .setrow.check > span:first-child { flex: 0 0 auto; }
   .setrow input[type=checkbox] { width: 18px; height: 18px; flex: 0 0 auto; }
   .setnote.check { padding-left: 26px; }
-  /* narrow phones: the label takes its own line so the control never
-     clips off the right edge, and notes use the full width */
   @media (max-width: 419px) {
     .setrow { flex-wrap: wrap; row-gap: 4px; }
     .setrow > span:first-child { flex: 1 0 100%; }
@@ -279,118 +416,80 @@
     .setnote { padding-left: 0; margin-top: -2px; }
     .setnote.check { padding-left: 26px; }
   }
-  .settitle { font-size: 15px; opacity: 0.85; }
+  select {
+    background: #e6e9e6;
+    color: var(--ink);
+    border: 1px solid #cfd3d0;
+    border-radius: 7px;
+    padding: 5px 8px;
+    font-size: 13px;
+  }
+  .btnrow { display: flex; gap: 6px; flex-wrap: wrap; }
   .setactions { justify-content: center; }
-  .setactions button.small { padding: 6px 12px; font-size: 12px; }
-  button.small.danger {
-    background: rgba(255, 92, 74, 0.16);
-    color: #ffb3a6;
+  button.small {
+    white-space: nowrap;
+    background: #e6e9e6;
+    color: var(--ink);
+    border: 1px solid #cfd3d0;
+    border-radius: 8px;
+    padding: 7px 13px;
+    font-size: 13px;
+    cursor: pointer;
   }
-  button.small.danger:active { background: rgba(255, 92, 74, 0.34); }
-  #versionrow {
-    display: flex; align-items: center; gap: 10px;
-    width: 100%;
-    justify-content: center;
-    font-size: 12px;
-  }
+  button.small:active { background: var(--porcelain-lo); }
+  button.small.danger { background: #fbe9e5; border-color: #f0c7be; color: #a1321f; }
+  button.small.danger:active { background: #f5d4cc; }
+  #versionrow { display: flex; align-items: center; gap: 10px; width: 100%; justify-content: center; font-size: 13px; }
   #buildinfo { opacity: 0.7; font-variant-numeric: tabular-nums; }
-  #updnote {
-    padding-left: 0; text-align: center; margin-top: -4px; min-height: 15px;
+  #updnote { padding-left: 0; text-align: center; margin-top: -4px; min-height: 15px; }
+  #setclose, #boxclose {
+    align-self: center;
+    padding: 10px 28px;
+    border: 1px solid #45464b; border-radius: 10px;
+    background: var(--enamel-hi);
+    color: var(--panel-fg);
+    font: 600 13px/1 var(--label);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
   }
+
+  /* the paint box: the pans you carry on a tray, the whole box below */
+  .boxhint { text-align: center; font-size: 13px; color: var(--stamp); max-width: 520px; }
   #boxslots {
     display: grid;
     grid-template-columns: repeat(8, 1fr);
-    gap: 5px;
-    max-width: 460px;
-    margin: 0 auto;
+    gap: 7px;
+    max-width: 520px;
     width: 100%;
+    padding: 10px;
+    background: var(--porcelain);
+    border-radius: 10px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.25);
+    color: var(--ink);
   }
-  #boxslots .pan.selected { outline: 2px solid #fff; }
+  #boxslots .panlabel { color: var(--ink); }
+  #boxslots .pan.selected { box-shadow: 0 0 0 2px var(--brass), inset 0 2px 4px rgba(0,0,0,0.5); }
   #boxgrid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-    gap: 7px;
-    max-width: 620px;
-    margin: 0 auto;
+    grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+    gap: 10px;
+    max-width: 640px;
     width: 100%;
   }
-  #boxgrid .pan.inuse { outline: 2px dashed rgba(255,255,255,0.5); }
-  /* the box shows each paint as a range, mass tone through to a thin wash,
-     so the dark ones are telling apart at a glance */
-  #boxgrid .pan { aspect-ratio: 1.45; }
+  #boxgrid .panlabel { color: var(--stamp); opacity: 0.85; }
+  #boxgrid .pan { aspect-ratio: 1.45; border-color: #2e2f33; }
+  #boxgrid .pan.inuse { box-shadow: 0 0 0 2px var(--brass); }
   .pan.swatchramp { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35); }
   .pan.addpan {
-    background: rgba(255,255,255,0.08);
-    color: var(--panel-fg);
+    background: transparent;
+    color: var(--ink);
     font-size: 20px; line-height: 1;
-    border-style: dashed;
+    border: 2px dashed #b9bdba;
+    box-shadow: none;
   }
-  #boxcost { opacity: 0.6; font-size: 11px; }
-  .boxhint { text-align: center; font-size: 12px; opacity: 0.75; }
-  #boxclose {
-    align-self: center;
-    padding: 8px 22px;
-    border: none; border-radius: 9px;
-    background: rgba(255,255,255,0.16);
-    color: var(--panel-fg);
-    font-size: 14px;
-    cursor: pointer;
-  }
-  /* The status line sits on a tab above the bar: readable against the
-     painting, and it costs the toolbar no height. */
-  #pigname {
-    position: absolute;
-    left: 10px; top: -19px;
-    max-width: calc(100% - 20px);
-    font-size: 11px;
-    opacity: 0.9;
-    text-align: left;
-    background: var(--panel-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    padding: 3px 9px;
-    border-radius: 7px 7px 0 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  /* ---- landscape (a tablet or phone held sideways): one flat bar, maximum
-     paper. Every group flexes between a minimum and its portrait width, so
-     the bar fits an 844px phone and a 1440px desktop alike — fixed widths
-     here once pushed half the controls off the right edge of a phone. ---- */
-  @media (orientation: landscape) and (min-width: 700px) {
-    #toolbar {
-      flex-direction: row;
-      align-items: center;
-      gap: 12px;
-      padding: 6px 14px max(6px, var(--safe-bottom));
-    }
-    #mixstroke { flex: 0 1 220px; min-width: 80px; margin: 0; }
-    #workbench { flex: 3 1 220px; min-width: 0; max-width: 420px; margin: 0; }
-    #brushrow  { flex: 3 1 210px; min-width: 0; max-width: 380px; margin: 0; }
-    #actionrow { flex: 6 1 260px; min-width: 0; max-width: 460px; margin: 0; }
-    /* the paper select starts narrow and grows, so the action row stays on
-       one line wherever the bar can afford it */
-    #actionrow select { flex: 1 1 76px; }
-    .pan { aspect-ratio: 2.2; }
-  }
-  /* Phones: every row earns its height. The plate shrinks, the brush column
-     fills what is left, and nothing wraps to a second line. */
-  @media (max-width: 520px) {
-    #toolbar { gap: 6px; padding: 7px 8px max(5px, var(--safe-bottom)); }
-    .tool { height: 31px; font-size: 17px; }
-    #palette { gap: 4px; }
-    .pan { aspect-ratio: 2.4; border-radius: 5px; }
-    .panlabel { font-size: 7px; }
-    button.small { padding: 4px 5px; }
-  }
-  /* the narrowest phones: the action row wraps into two lines — setup on
-     one, painting actions on the other — and each line fills its width */
-  @media (max-width: 374px) {
-    #actionrow .small { flex: 1 1 auto; }
-    #actionrow select { flex: 1 1 64px; min-width: 64px; }
-    #actionrow .flexgap { flex: 0 0 0; }
-  }
+  #boxcost { font-size: 12px; opacity: 0.75; }
+
   #err {
     position: absolute; inset: 0;
     display: none;
@@ -399,40 +498,61 @@
     padding: 24px; text-align: center;
     font-size: 15px; line-height: 1.5;
   }
+  @media (prefers-reduced-motion: reduce) {
+    .pan:active { transform: none; }
+  }
 </style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
 <div id="brushcursor"></div>
 <div id="err"></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-jar" viewBox="0 0 24 24"><path d="M6.5 4h11l-1.3 16.2a1 1 0 0 1-1 .8H8.8a1 1 0 0 1-1-.8z"/><path d="M7.3 10.5h9.4"/><path d="M9.8 15.2c1.2-1.1 3.2-1.1 4.4 0"/></symbol>
+    <symbol id="i-salt" viewBox="0 0 24 24"><path d="M8.5 4.5h7l1.5 4.5h-10z"/><rect x="7" y="9" width="10" height="11.5" rx="2"/><path d="M10.5 6.6h.01M13.5 6.6h.01"/></symbol>
+    <symbol id="i-wet" viewBox="0 0 24 24"><path d="M12 3.2c3.3 4.2 6 7.4 6 11.1a6 6 0 0 1-12 0c0-3.7 2.7-6.9 6-11.1z"/><path d="M9.2 14.6a2.8 2.8 0 0 0 2.8 2.8"/></symbol>
+    <symbol id="i-dry" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/></symbol>
+    <symbol id="i-tilt" viewBox="0 0 24 24"><rect x="8.5" y="2.8" width="8" height="14" rx="1.6" transform="rotate(-20 12.5 9.8)"/><path d="M4 20.5h16"/><path d="M15.5 17.8c.9 1 .9 1.9 0 2.7"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M8.5 5.5L4 10l4.5 4.5"/><path d="M4 10h10a5 5 0 0 1 0 10h-3"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="M3.5 8.5l1.8-3h13.4l1.8 3"/><rect x="3.5" y="8.5" width="17" height="10.5" rx="1.6"/><path d="M9.2 8.5V19M14.8 8.5V19"/></symbol>
+    <symbol id="i-set" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="1.9"/><circle cx="15" cy="12" r="1.9"/><circle cx="8" cy="17" r="1.9"/></symbol>
+  </defs>
+</svg>
 <div id="toolbar">
-  <canvas id="mixstroke" title="The mix as it dries on this paper: colour, granulation and transparency"></canvas>
-  <div id="workbench">
-    <div id="palette"></div>
-  </div>
-  <div id="brushrow">
-    <div id="tools">
-      <button id="clean" class="tool" title="Rinse the colour off the hairs — the water slider is left alone">🌀</button>
+  <div id="tray">
+    <div id="workbench">
+      <div id="palette"></div>
     </div>
-    <div id="brushwrap" title="The brush: paint on the hairs, water on the hairs, and their ratio (dilution)">
-      <div id="brushsliders">
-        <label class="bsl" title="How much of the mix is on the brush"><span>🎨</span><input id="paintload" type="range" min="0" max="100" value="0"></label>
-        <label class="bsl" title="How much water is on the brush — this alone decides how wet the paper gets, and it never changes the paint"><span>💧</span><input id="waterload" type="range" min="0" max="100" value="60"></label>
-        <label class="bsl" title="Brush size"><span>🖌</span><input id="size" type="range" min="2" max="60" value="16"></label>
+    <div id="brushrow">
+      <div id="well" title="The mix as it dries on this paper: colour, granulation and transparency">
+        <canvas id="mixstroke"></canvas>
+        <div id="consistency">tea</div>
       </div>
-      <div id="consistency">tea</div>
+      <div id="tools">
+        <button id="clean" class="tool" title="Rinse the colour off the hairs — the water slider is left alone"><svg class="ic"><use href="#i-jar"/></svg><span>Rinse</span></button>
+      </div>
+      <div id="brushwrap" title="The brush: paint on the hairs, water on the hairs, and its size">
+        <div id="brushsliders">
+          <label class="bsl" title="How much of the mix is on the brush"><span>Paint</span><input id="paintload" type="range" min="0" max="100" value="0"></label>
+          <label class="bsl" title="How much water is on the brush — this alone decides how wet the paper gets, and it never changes the paint"><span>Water</span><input id="waterload" type="range" min="0" max="100" value="60"></label>
+          <label class="bsl" title="Brush size"><span>Size</span><input id="size" type="range" min="2" max="60" value="16"></label>
+        </div>
+      </div>
     </div>
   </div>
   <div id="actionrow">
-    <select id="paper" title="Paper"></select>
-    <button id="boxbtn" class="small">Paint box…</button>
-    <button id="setbtn" class="small" title="Settings &amp; more">⚙</button>
-    <span class="flexgap"></span>
-    <button id="salt" class="small" title="Salt: sprinkle into a damp wash for starbursts">🧂</button>
-    <button id="wetview" class="small" title="Wetness view: see wet / satin / damp zones">👁</button>
-    <button id="dry" class="small" title="Flash-dry the whole sheet (hold)">Dry</button>
-    <button id="undo" class="small" title="Undo the last stroke, salting or clear (or tap with two fingers)">↶</button>
-    <button id="fitview" class="small" title="Show the whole sheet">⤢</button>
+    <button id="salt" class="lidbtn" title="Salt: sprinkle into a damp wash for starbursts"><svg class="ic"><use href="#i-salt"/></svg><span>Salt</span></button>
+    <button id="wetview" class="lidbtn" title="Wetness view: see wet / satin / damp zones"><svg class="ic"><use href="#i-wet"/></svg><span>Wet</span></button>
+    <button id="dry" class="lidbtn" title="Flash-dry the whole sheet (hold)"><svg class="ic"><use href="#i-dry"/></svg><span>Dry</span></button>
+    <button id="tilt" class="lidbtn" title="Tilt the device and thick wet paint runs downhill"><svg class="ic"><use href="#i-tilt"/></svg><span>Tilt</span></button>
+    <span class="hinge"></span>
+    <button id="undo" class="lidbtn" title="Undo the last stroke, salting or clear (or tap with two fingers)"><svg class="ic"><use href="#i-undo"/></svg><span>Undo</span></button>
+    <button id="fitview" class="lidbtn" title="Show the whole sheet"><svg class="ic"><use href="#i-fit"/></svg><span>Fit</span></button>
+    <span class="hinge"></span>
+    <button id="boxbtn" class="lidbtn" title="Choose the paints in your box"><svg class="ic"><use href="#i-box"/></svg><span>Box</span></button>
+    <button id="setbtn" class="lidbtn" title="Settings &amp; more"><svg class="ic"><use href="#i-set"/></svg><span>Settings</span></button>
   </div>
   <div id="pigname"></div>
 </div>
@@ -457,7 +577,7 @@
     <div class="setnote check">On: water and paint leave the hairs as you draw, so a long stroke fades and ends in dry-brush. Off: the brush holds its load, and every line comes out the same however many you draw.</div>
 
     <div class="setrow check"><input id="presssize" type="checkbox" checked><span>Pencil pressure → brush size</span></div>
-    <div class="setnote check">Apple Pencil force drives the width of the stroke. Off: the 🖌 Size slider alone decides.</div>
+    <div class="setnote check">Apple Pencil force drives the width of the stroke. Off: the Size slider alone decides.</div>
 
     <div class="setrow"><span>Pressure range</span><input id="pressrange" type="range" min="0" max="100" value="60"></div>
     <div class="setnote">How much Apple Pencil force changes the width of the stroke.</div>
@@ -478,6 +598,9 @@
 
   <div class="setsection">
     <div class="sethead">Water &amp; paper</div>
+    <div class="setrow"><span>Paper</span><select id="paper" title="Paper"></select></div>
+    <div class="setnote">Changing the paper starts a fresh sheet.</div>
+
     <div class="setrow"><span>Drying speed</span><input id="drying" type="range" min="0" max="100" value="30"></div>
     <div class="setnote">How fast the sheet loses its shine. Left = minutes of open wet-in-wet time, right = sets in seconds.</div>
 
@@ -506,7 +629,6 @@
     <div class="btnrow setactions">
       <button id="newpainting" class="small" title="Clear the sheet and choose the palette for a new painting">New painting…</button>
       <button id="demo" class="small">Demo</button>
-      <button id="tilt" class="small" title="Tilt the device and thick wet paint runs downhill">Tilt</button>
       <button id="save" class="small" title="Export the painting as a PNG">Save</button>
       <button id="log" class="small" title="Export this session's strokes as JSON">Log</button>
     </div>
