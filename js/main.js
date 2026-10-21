@@ -558,11 +558,42 @@
     sim.clearAll();
     sim.commitUndo();
   });
+  // Dry: a tap dries the whole sheet. It used to dry only while held, and
+  // a session log showed what a tap did with that — six presses of two or
+  // three frames each, which is nothing anyone could see ("dry button
+  // seems to do nothing"). Now a tap starts fast drying, the button stays
+  // lit, and it switches itself off once the frame loop's own wetness
+  // check (sim._wasWet, every 20 frames) finds nothing wet; a second tap
+  // stops it early.
   const dryBtn = document.getElementById('dry');
-  dryBtn.addEventListener('pointerdown', () => { sim.params.drySpeed = 30; LOGBOOK.log('drySpeed', { v: 30 }); });
-  const dryOff = () => { sim.params.drySpeed = 1; LOGBOOK.log('drySpeed', { v: 1 }); };
-  dryBtn.addEventListener('pointerup', dryOff);
-  dryBtn.addEventListener('pointerleave', dryOff);
+  // measured on a soaked wash: dry in about two seconds at these, while at
+  // 60x the film and 1x the paper it took over a minute
+  const DRY_FAST = 1500, DRY_PAPER = 100;
+  let dryTimer = null;
+  function stopDrying(msg) {
+    clearInterval(dryTimer);
+    dryTimer = null;
+    sim.params.drySpeed = 1;
+    sim.params.satBoost = 1;
+    dryBtn.classList.remove('on');
+    LOGBOOK.log('drySpeed', { v: 1, paper: 1 });
+    if (msg) updateBrushView(msg);
+  }
+  dryBtn.addEventListener('click', () => {
+    if (dryTimer) { stopDrying('Stopped drying'); return; }
+    sim.params.drySpeed = DRY_FAST;
+    sim.params.satBoost = DRY_PAPER;
+    sim.markDirty();
+    dryBtn.classList.add('on');
+    LOGBOOK.log('drySpeed', { v: DRY_FAST, paper: DRY_PAPER });
+    updateBrushView('Drying the sheet…');
+    const t0 = performance.now();
+    dryTimer = setInterval(() => {
+      // markDirty keeps the loop stepping for a moment; after that the
+      // wetness check decides, and twenty seconds is a backstop
+      if ((performance.now() - t0 > 600 && sim._wasWet === false) || performance.now() - t0 > 20000) stopDrying('Dry');
+    }, 200);
+  });
   document.getElementById('demo').addEventListener('click', () => DEMO.start(sim));
 
   const paperSel = document.getElementById('paper');
@@ -774,6 +805,32 @@
     const b = ((e.beta || 0) * Math.PI) / 180, g = ((e.gamma || 0) * Math.PI) / 180;
     return [Math.sin(g) * Math.cos(b), -Math.sin(b), -Math.cos(g) * Math.cos(b)];
   }
+  // Record the tilt the sheet actually ran under, so a session log can say
+  // where the water went and a replay can reproduce the run (REPLAY applies
+  // 'tilt' events). Without it a log showed tilt switched on and nothing
+  // more. Logged when the vector turns by 8 degrees or changes size by a
+  // fifth, at most every 15 frames, with the raw reading alongside.
+  let tiltLogged = null;
+  let tiltLoggedAt = -1e9;
+  function logTilt(e, a) {
+    const v = sim.params.tilt;
+    const m = Math.hypot(v[0], v[1]);
+    if (tiltLogged) {
+      const m0 = Math.hypot(tiltLogged[0], tiltLogged[1]);
+      const turn = m > 1e-4 && m0 > 1e-4
+        ? Math.abs(Math.atan2(v[0] * tiltLogged[1] - v[1] * tiltLogged[0], v[0] * tiltLogged[0] + v[1] * tiltLogged[1])) * 180 / Math.PI
+        : (m > 1e-4) !== (m0 > 1e-4) ? 180 : 0;
+      const grew = Math.abs(m - m0) > 0.2 * Math.max(m, m0) && Math.abs(m - m0) > 0.003;
+      if (turn < 8 && !grew) return;
+      if (LOGBOOK.frame - tiltLoggedAt < 15) return;
+    }
+    tiltLogged = [v[0], v[1]];
+    tiltLoggedAt = LOGBOOK.frame;
+    const r3 = (x) => Math.round(x * 1000) / 1000;
+    LOGBOOK.log('tilt', { v: [r3(v[0]), r3(v[1])], beta: e ? Math.round(e.beta) : null,
+      gamma: e ? Math.round(e.gamma) : null, screen: Math.round((a * 180) / Math.PI) });
+  }
+
   function onOrient(e) {
     if (!tiltOn) return;
     if (e.beta == null && e.gamma == null) return; // a reading with no data
@@ -805,6 +862,7 @@
     // sheet v points up the screen, like device y
     sim.params.tilt = [sx * k, sy * k];
     if (Math.abs(sx) + Math.abs(sy) > 0.01) sim.markDirty();
+    logTilt(e, a);
     window.__tiltDebug = { beta: e.beta, gamma: e.gamma, down, angleDeg: ang,
                            screenAngle: (a * 180) / Math.PI, tilt: sim.params.tilt };
   }
@@ -822,6 +880,8 @@
     clearTimeout(tiltWatchdog);
     window.removeEventListener('deviceorientation', onOrient);
     sim.params.tilt = [0, 0];
+    tiltLogged = null;
+    LOGBOOK.log('tilt', { v: [0, 0] });
     tiltBtn.classList.remove('on');
     if (msg) updateBrushView(msg);
   }
@@ -985,7 +1045,11 @@
   // which is convex — it squashed exactly that working range flat and only
   // opened up under a hard press. A concave curve spends the size range
   // where the hand actually is.
+  // whether the pressure being painted with is a Pencil's: a finger or a
+  // mouse has none to speak of, and paints at the Size as set
+  let penForce = false;
   function pressureOf(e) {
+    penForce = e.pointerType === 'pen';
     if (e.pointerType === 'pen') {
       const p = Math.min(Math.max(e.pressure > 0 ? e.pressure : 0.4, 0), 1);
       return Math.pow(p, 0.55);
@@ -995,11 +1059,19 @@
 
   function brushSize(pressure) {
     const base = Number(sizeEl.value);
-    if (!SET.pressureSize) return base;
-    // pressRange 0 = size fixed, 1 = a light touch is a third of the width
-    // and a firm one about half again as wide
+    if (!SET.pressureSize || !penForce) return base;
+    // pressRange 0 = size fixed; 1 = a feather touch is a hair (0.05 of
+    // the size) and a hard press more than twice the size, so one stroke
+    // goes from thin to thick. It used to span 0.15..1.65 over a curve that
+    // had already squeezed the light end, which in the Pencil's working
+    // range (0.05..0.5 of full force) came to under three times, and "even
+    // at max it is not enough difference". The size is taken from the raw
+    // force (undoing pressureOf's curve), linearly: the light end is where
+    // the thin line lives, and any curve that lifts it costs the hairline.
     const r = SET.pressRange;
-    return base * (1 - r * 0.85 + pressure * r * 1.5);
+    const raw = Math.pow(Math.min(Math.max(pressure, 0), 1), 1 / 0.55);
+    const lo = 1 - 0.95 * r, hi = 1 + 1.2 * r;
+    return base * (lo + (hi - lo) * raw);
   }
 
   // A Pencil held at an angle lays its hairs along the paper. Safari reports

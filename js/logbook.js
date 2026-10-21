@@ -151,7 +151,7 @@ const REPLAY = (() => {
           }
           if (e.runoff != null) sim.setFlow(e.runoff);
         }
-        else if (e.t === 'drySpeed' && window.sim) sim.params.drySpeed = e.v;
+        else if (e.t === 'drySpeed' && window.sim) { sim.params.drySpeed = e.v; sim.params.satBoost = e.paper || 1; }
         else if (e.t === 'drying' && window.sim) sim.params.dryScale = 0.5 * Math.pow(8, (e.v - 30) / (e.v <= 30 ? 30 : 70));
         else if (e.t === 'tilt' && window.sim) sim.params.tilt = e.v;
       }

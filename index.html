@@ -348,6 +348,19 @@
     .bsl > span { flex-basis: 34px; }
     .lidbtn { height: 40px; gap: 2px; }
   }
+  /* iPads, either way up: Paint, Water and Size side by side, each label
+     over its groove, so the three read as one row of the brush */
+  @media (min-width: 700px) and (min-height: 500px) {
+    #brushsliders { flex-direction: row; gap: 16px; }
+    .bsl { flex: 1 1 0; flex-direction: column; align-items: stretch; gap: 1px; height: auto; min-width: 0; }
+    .bsl > span { flex: none; }
+    .bsl input[type=range] { width: 100%; flex: none; }
+  }
+  @media (orientation: landscape) and (min-width: 1100px) and (min-height: 500px) {
+    #brushrow { max-width: none; }
+    #well { flex-basis: 110px; }
+    .lidbtn { width: 46px; }
+  }
   /* small phones: no captions under the brush controls' labels, slimmer cups */
   @media (max-width: 380px) {
     #well { flex-basis: 80px; }
@@ -545,7 +558,7 @@
   <div id="actionrow">
     <button id="salt" class="lidbtn" title="Salt: sprinkle into a damp wash for starbursts"><svg class="ic"><use href="#i-salt"/></svg><span>Salt</span></button>
     <button id="wetview" class="lidbtn" title="Wetness view: see wet / satin / damp zones"><svg class="ic"><use href="#i-wet"/></svg><span>Wet</span></button>
-    <button id="dry" class="lidbtn" title="Flash-dry the whole sheet (hold)"><svg class="ic"><use href="#i-dry"/></svg><span>Dry</span></button>
+    <button id="dry" class="lidbtn" title="Dry the whole sheet (tap again to stop)"><svg class="ic"><use href="#i-dry"/></svg><span>Dry</span></button>
     <button id="tilt" class="lidbtn" title="Tilt the device and thick wet paint runs downhill"><svg class="ic"><use href="#i-tilt"/></svg><span>Tilt</span></button>
     <span class="hinge"></span>
     <button id="undo" class="lidbtn" title="Undo the last stroke, salting or clear (or tap with two fingers)"><svg class="ic"><use href="#i-undo"/></svg><span>Undo</span></button>
@@ -580,7 +593,7 @@
     <div class="setnote check">Apple Pencil force drives the width of the stroke. Off: the Size slider alone decides.</div>
 
     <div class="setrow"><span>Pressure range</span><input id="pressrange" type="range" min="0" max="100" value="60"></div>
-    <div class="setnote">How much Apple Pencil force changes the width of the stroke.</div>
+    <div class="setnote">How much Apple Pencil force changes the width of the stroke. At the far right a feather touch draws a hairline and a hard press more than twice the Size, so one stroke can go from thin to thick.</div>
 
     <div class="setrow check"><input id="pressflow" type="checkbox" checked><span>Pencil pressure → paint flow</span></div>
     <div class="setnote check">Pressing harder lets paint leave the brush faster, so a firm pass is darker and a light one a tint. The brush still pays for every bit it lays. Off: pressure changes only the width.</div>

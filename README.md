@@ -158,6 +158,17 @@ reached:
   only the picture did, so the picture is now shaded once per grid cell
   into an ordinary 8-bit texture and magnified from there. Settings → About
   says which engine a device got.
+- **Water was being destroyed under every wash held above dry paper.** The
+  contact-line gate on a cell's bottom face had its destination's
+  surroundings and grain swapped with its own, so where water left a cell
+  downward the two cells sharing the face disagreed: the giver let it go,
+  the dry cell below would not take it, and it vanished. Flat, a pooled
+  scribble lost about 1% and crept into a convex polygon with ruler-straight
+  sides; tilted, a wash lost a quarter of its water and a few percent of its
+  pigment in four seconds and spilled as root-like threads. Found by
+  writing the transport pass's face gates out of a debug copy and checking
+  each face from both sides. With all drying switched off, a tilted wash
+  now holds its water and pigment exactly.
 - **Salt made pigment.** The starburst was done by resampling the pigment
   field a few texels sideways, the one resample left in the engine, and a
   resample is not conservative: two cells could read the same source
@@ -474,9 +485,12 @@ frame in the old build. Three changes:
   where you put it, for controlled detail work.
 - **Brush runs out as you paint** — off keeps the brush's load constant, so
   repeated lines come out identical.
-- **Pencil pressure → brush size** — Apple Pencil force drives stroke width
-  (a light touch goes genuinely fine, a hard press spreads the whole belly
-  of the brush). Off: the Size slider alone decides.
+- **Pencil pressure → brush size** — Apple Pencil force drives stroke width,
+  linearly with the raw force: at the full **Pressure range** a feather
+  touch is a hairline (0.05 of the Size) and a hard press more than twice
+  the Size, so one stroke goes from thin to thick (measured: 12x within one
+  stroke). Fingers and the mouse paint at the Size. Off: the Size slider
+  alone decides.
 - **Pencil pressure → paint flow** — pressing harder lets paint leave the
   brush faster. Off: pressure changes only the width.
 - **Pencil tilt shapes the brush** — a leaning Pencil stretches the dab
@@ -559,6 +573,10 @@ paste it into the console as `REPLAY.load(sessionJson)` and the app replays
 it stroke for stroke. Sharing a log + a screenshot of the result is the best
 way to report "this didn't behave like real watercolor".
 
+The log records the **tilt** the sheet ran under, with the raw sensor
+angles, whenever it turns by 8 degrees or changes by a fifth, so a replay
+reproduces a run and a log can say where the water went.
+
 ## Brush & workflow (inspired by Adobe Fresco / Art Set 4)
 
 - **Depleting reservoirs**: the brush carries finite water and pigment;
@@ -596,9 +614,17 @@ way to report "this didn't behave like real watercolor".
   Readings are smoothed and the first five degrees away from level do
   nothing: a hand is never still, and taken raw every wobble ran the
   water a different way. **Tilt strength** in Settings sets how steeply
-  it runs; with run-off off, tilt does nothing.
-- **Dry**: hold to flash-dry the sheet, then glaze over — dried washes
-  resist re-blending except through deliberate rewetting.
+  it runs, and not only how fast: on a gentle slope a bead has to be
+  deeper before it breaks onto dry paper and a film deeper before it
+  slides, so at a low strength an ordinary wash holds and only a puddle
+  runs. With nothing pulling it, a creeping edge fills notches and holds
+  where it is flat, as surface tension does. With run-off off, tilt does
+  nothing.
+- **Dry**: tap to dry the whole sheet, film and damp paper both (a soaked
+  wash in about three seconds); the button stays lit until the sheet is
+  dry and switches itself off, and a second tap stops it. It used to dry
+  only while held, so a tap did nothing visible. Then glaze over — dried
+  washes resist re-blending except through deliberate rewetting.
 - **Save** exports a PNG.
 
 ## Files

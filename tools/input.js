@@ -182,6 +182,28 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
   check('tilted pen stretches the dab along its azimuth', r.fw > r.rw * 1.5 && Math.abs(r.fh - r.rh) <= 3 && r.logged > 0,
     `upright ${r.rw}x${r.rh}, leaning ${r.fw}x${r.fh}, ${r.logged} shaped splats logged`);
 
+  // --- 7b. one Pencil stroke goes from a hairline to a broad mark: at the
+  // full pressure range a feather touch and a hard press differ in width
+  // many times over (they differed under three times, "not enough")
+  r = await page.evaluate(() => {
+    sim.clearAll(); sim.clearUndo();
+    const el = document.getElementById('pressrange');
+    const was = el.value;
+    el.value = 100; el.dispatchEvent(new Event('input', { bubbles: true }));
+    T.load();
+    const n0 = LOGBOOK.export().events.length;
+    T.ev('pointerdown', { clientX: 300, clientY: 300, pressure: 0.03, altitudeAngle: Math.PI / 2, azimuthAngle: 0 });
+    T.ev('pointermove', { clientX: 340, clientY: 300, pressure: 0.03, altitudeAngle: Math.PI / 2, azimuthAngle: 0 });
+    T.ev('pointermove', { clientX: 380, clientY: 300, pressure: 0.6, altitudeAngle: Math.PI / 2, azimuthAngle: 0 });
+    T.ev('pointermove', { clientX: 420, clientY: 300, pressure: 0.6, altitudeAngle: Math.PI / 2, azimuthAngle: 0 });
+    T.ev('pointerup', { clientX: 420, clientY: 300, pressure: 0, buttons: 0 });
+    const sp = LOGBOOK.export().events.slice(n0).filter((e) => e.t === 'splat').map((e) => e.r);
+    el.value = was; el.dispatchEvent(new Event('input', { bubbles: true }));
+    return { thin: Math.min(...sp), thick: Math.max(...sp), n: sp.length };
+  });
+  check('one Pencil stroke goes from thin to thick', r.n > 2 && r.thick > r.thin * 5,
+    `radius ${r.thin.toFixed(1)} -> ${r.thick.toFixed(1)} (${(r.thick / r.thin).toFixed(1)}x) over ${r.n} dabs`);
+
   // --- 8. two fingers pinch to zoom, and the stroke that began is taken back
   r = await page.evaluate(() => {
     sim.clearAll(); sim.clearUndo(); sim.fitView();
@@ -318,12 +340,13 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
     const out = { held: dir(60, 0, 0), wobble: dir(57, 10, 0), leanBack: dir(45, 0, 0),
                   land90: dir(0, -60, 90), land270: dir(0, 60, 270), flat: dir(2, 2, 0) };
     document.getElementById('tilt').click();
+    out.logged = JSON.parse(LOGBOOK.export ? JSON.stringify(LOGBOOK.export()) : '{}').events.filter((e) => e.t === 'tilt').length;
     return out;
   });
   check('tilt runs the water to the lowest edge of the screen',
     Math.abs(r.held.deg) <= 2 && r.held.mag > 0.1 && Math.abs(r.wobble.deg) <= 12 && Math.abs(r.leanBack.deg) <= 2
-      && Math.abs(r.land90.deg) <= 2 && Math.abs(r.land270.deg) <= 2 && r.flat.mag === 0,
-    `deg from down: held ${r.held.deg}, wobble ${r.wobble.deg}, leaning back ${r.leanBack.deg}, landscape ${r.land90.deg}/${r.land270.deg}; flat ${r.flat.mag}`);
+      && Math.abs(r.land90.deg) <= 2 && Math.abs(r.land270.deg) <= 2 && r.flat.mag === 0 && r.logged >= 2,
+    `deg from down: held ${r.held.deg}, wobble ${r.wobble.deg}, leaning back ${r.leanBack.deg}, landscape ${r.land90.deg}/${r.land270.deg}; flat ${r.flat.mag}; ${r.logged} tilt events logged`);
 
   if (errors.length) { console.log('\nPAGE ERRORS:'); for (const e of errors.slice(0, 10)) console.log('  ' + e); }
   const pass = results.filter((x) => x[1]).length;
