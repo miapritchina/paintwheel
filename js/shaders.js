@@ -296,9 +296,11 @@ void main() {
   // slope: a gentle slope holds a film that a steep one sends. Without
   // this the strength set only the speed, and a wash at low strength ran
   // as far as at high (the volume decides the distance, not the speed).
-  // grip: 1 at a tilt of 0.2 (default strength, the device held at about
-  // fifty degrees); below that a film must be proportionally deeper.
-  float grip = clamp(length(uTilt) / 0.2, 0.35, 1.5);
+  // grip: 1 at a tilt of 0.2; below that a film must be proportionally
+  // deeper. Steeper than that it stays 1 and only the speed grows: it used
+  // to go on loosening to 1.5, and a steep sheet let go along every faint
+  // drip lane at once, a comb of teeth under each stroke.
+  float grip = clamp(length(uTilt) / 0.2, 0.35, 1.0);
   target += uTilt * smoothstep(0.025, 0.1, h * grip);
 
   vec2 vel = mix(target, f.yz, uInertia);
@@ -383,13 +385,16 @@ float lnoise(vec2 p) {
 // lanes of a smooth noise stretched along the downhill direction (a drip
 // runs straight down), wandering and opening and closing along their
 // length so drips from strokes at different heights do not line up.
+// Narrow: a drip is a thin rivulet a few px wide, not a block. The lanes
+// were a third of the edge, and with a run's sides pinned each one slid
+// down as a square-ended column.
 // Sized on the sheet in css px, not in cells, so a drip is as wide on a
 // phone's fine grid as on a battery-saving coarse one.
 float lane(vec2 uv) {
   vec2 c = uv * uSheetPx;
   vec2 across = vec2(-uDown.y, uDown.x);
-  vec2 q = vec2(dot(c, across) / 30.0, dot(c, uDown) / 110.0);
-  return smoothstep(0.45, 0.6, 0.65 * lnoise(q) + 0.35 * lnoise(q * 2.3 + 17.0));
+  vec2 q = vec2(dot(c, across) / 26.0, dot(c, uDown) / 260.0);
+  return smoothstep(0.645, 0.665, 0.65 * lnoise(q) + 0.35 * lnoise(q * 2.3 + 17.0));
 }
 
 float pin(float hUpwind, float wDest, float aroundDest, float grainDest, float along, float laneDest) {
@@ -416,9 +421,14 @@ float pin(float hUpwind, float wDest, float aroundDest, float grainDest, float a
   // sideways along its own flanks until it was as wide as the stroke, and
   // a juicy stroke on a steep sheet slid down as one flat curtain.
   // Down the slope the edge lets go only in the drip lanes; elsewhere it
-  // holds like a side.
+  // holds like a side. That hold is whole from a gentle slope on: blended
+  // in along the grip, it was a fifth of what it should be on a phone held
+  // upright, the deep bead of a flooded stroke broke through it all along
+  // the edge, and the stroke slid down as a slab.
   float downhill = smoothstep(0.2, 0.8, along) * laneDest;
-  ease *= mix(1.0, mix(0.15, 1.15, downhill), uTiltGrip);
+  // (squared: the fringe of a lane barely loosens, so a steep sheet opens
+  // the lanes' cores and not every faint one along the edge)
+  ease *= mix(1.0, mix(0.03, 1.15, downhill * downhill), smoothstep(0.0, 0.3, uTiltGrip));
   // A cell the sheet drank dry in the middle of a run is not a contact
   // line: with wet film all round it, the film closes over it. Without
   // this the hole was permanent (nothing of ordinary depth could cross

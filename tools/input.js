@@ -344,7 +344,8 @@ const PORT = pi > 0 && process.argv[pi + 1] ? process.argv[pi + 1] : '8779';
     return out;
   });
   check('tilt runs the water to the lowest edge of the screen',
-    Math.abs(r.held.deg) <= 2 && r.held.mag > 0.1 && Math.abs(r.wobble.deg) <= 12 && Math.abs(r.leanBack.deg) <= 2
+    // (at the dial's default, 60 degrees is a slope of about 0.06)
+    Math.abs(r.held.deg) <= 2 && r.held.mag > 0.04 && Math.abs(r.wobble.deg) <= 12 && Math.abs(r.leanBack.deg) <= 2
       && Math.abs(r.land90.deg) <= 2 && Math.abs(r.land270.deg) <= 2 && r.flat.mag === 0 && r.logged >= 2,
     `deg from down: held ${r.held.deg}, wobble ${r.wobble.deg}, leaning back ${r.leanBack.deg}, landscape ${r.land90.deg}/${r.land270.deg}; flat ${r.flat.mag}; ${r.logged} tilt events logged`);
 

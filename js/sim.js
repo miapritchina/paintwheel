@@ -1125,9 +1125,10 @@ class WatercolorSim {
       // A bead breaks onto dry paper when the slope's pull on it beats the
       // grip of its edge, so on a gentle slope it has to be deeper first:
       // the thresholds scale with the tilt below the reference of 0.2 (the
-      // same `grip` the velocity pass uses). Flat, with no tilt, unchanged.
+      // same `grip` the velocity pass uses; no looser above it, see there).
+      // Flat, with no tilt, unchanged.
       const tl = Math.hypot(P.tilt[0], P.tilt[1]);
-      const grip = tl > 1e-4 ? Math.min(1.5, Math.max(0.35, tl / 0.2)) : 1;
+      const grip = tl > 1e-4 ? Math.min(1, Math.max(0.35, tl / 0.2)) : 1;
       gl.uniform2f(p.uniforms.uPin, P.pinLo / grip, P.pinHi / grip);
       gl.uniform1f(p.uniforms.uTiltGrip, Math.min(1, tl / 0.2));
       gl.uniform2f(p.uniforms.uDown, tl > 1e-4 ? P.tilt[0] / tl : 0, tl > 1e-4 ? P.tilt[1] / tl : 0);

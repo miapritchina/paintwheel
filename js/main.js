@@ -400,7 +400,7 @@
     runoff: true,      // paint and water travel across the sheet
     pressureSize: true,// stylus pressure drives brush size
     deplete: true,     // the brush runs out as you paint
-    tiltStrength: 1.0, // how steeply tilt runs the paint
+    tiltStrength: 0.3, // how steeply tilt runs the paint (the dial's middle)
     pressRange: 0.6,   // how far stylus force moves the brush size
     pressFlow: true,   // stylus pressure drives how fast paint leaves the brush
     tiltShape: true,   // stylus tilt stretches the footprint along the pen
@@ -528,9 +528,16 @@
     // exactly why it stays a choice (flat colour, long even lines).
     SET.deplete = depleteEl.checked;
     brush.releaseMode = SET.deplete ? 'real' : 'never';
-    // 0..4x. The old ceiling was 2x and the log shows it pinned there twice,
-    // so the top of the dial was the answer rather than a limit.
-    SET.tiltStrength = (Number(tiltStrEl.value) / 100) * 4;
+    // 0..1.2x, on a square law. A phone is mostly held near upright, where
+    // the slope is 0.25 x strength, and everything a slope changes — how
+    // readily an edge lets go, how fast the run moves — stops changing past
+    // a slope of 0.2 to 0.3. The old 0..4x linear dial got there a fifth of
+    // the way up, so all its travel above that did nothing and the useful
+    // part was a sliver at the bottom. Now the whole travel is the useful
+    // range, finest at the gentle end: the middle (the default) runs a
+    // flooded stroke into a few drips and holds an ordinary one.
+    const tv = Number(tiltStrEl.value) / 100;
+    SET.tiltStrength = 1.2 * tv * tv;
     SET.pressRange = Number(pressRangeEl.value) / 100;
     SET.pressFlow = pressFlowEl.checked;
     SET.tiltShape = tiltShapeEl.checked;
@@ -1398,7 +1405,7 @@
           pickup: Number(pickupEl.value),
           saltsize: Number(saltsizeEl.value), runoff: runoffEl.checked,
           presssize: pressEl.checked, deplete: depleteEl.checked,
-          tiltstrength: Number(tiltStrEl.value), pressrange: Number(pressRangeEl.value),
+          tiltslope: Number(tiltStrEl.value), pressrange: Number(pressRangeEl.value),
           pressflow: pressFlowEl.checked, tiltshape: tiltShapeEl.checked, finger: fingerEl.value,
           quality: qualityEl.value,
         },
@@ -1443,7 +1450,10 @@
         if (s.runoff != null) runoffEl.checked = s.runoff;
         if (s.presssize != null) pressEl.checked = s.presssize;
         if (s.deplete != null) depleteEl.checked = s.deplete;
-        if (s.tiltstrength != null) tiltStrEl.value = s.tiltstrength;
+        // (saved as tiltstrength before the dial was rescaled: a position in
+        // the old units would read four times weaker or stronger, so it is
+        // left behind and the new default stands)
+        if (s.tiltslope != null) tiltStrEl.value = s.tiltslope;
         if (s.pressrange != null) pressRangeEl.value = s.pressrange;
         if (s.pressflow != null) pressFlowEl.checked = s.pressflow;
         if (s.tiltshape != null) tiltShapeEl.checked = s.tiltshape;

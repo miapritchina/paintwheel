@@ -174,6 +174,17 @@ reached:
   film levels faster sideways on a slope so the bead drains into them; and
   a one-cell slit between two runs side by side closes. The same strokes
   keep their shape and drip, and the drips carry the colour down.
+- **Drips came out as square-ended blocks and a comb of dark teeth.** The
+  drip lanes were a third of a stroke's lower edge, so each slid down as a
+  wide column with pinned sides; the hold between them was blended in
+  along the slope and was a fifth of what it should be with the phone held
+  upright, so a flooded stroke's deep bead broke through everywhere and
+  slid down as a slab; and past a slope of 0.2 the edge went on loosening,
+  so a steep sheet opened every faint lane at once. Now the lanes are thin
+  and nearly all-or-nothing, the edge between them holds fully from a
+  gentle slope on, and a steeper sheet runs the same few drips faster and
+  longer rather than more of them: a stroke keeps its shape, a dark bead
+  gathers along its lower edge, and two or three rivulets carry it down.
 - **Water was being destroyed under every wash held above dry paper.** The
   contact-line gate on a cell's bottom face had its destination's
   surroundings and grain swapped with its own, so where water left a cell
@@ -630,7 +641,9 @@ reproduces a run and a log can say where the water went.
   Readings are smoothed and the first five degrees away from level do
   nothing: a hand is never still, and taken raw every wobble ran the
   water a different way. **Tilt strength** in Settings sets how steeply
-  it runs, and not only how fast: on a gentle slope a bead has to be
+  it runs, and not only how fast (the dial's whole travel is the useful
+  range, finest at the gentle end; it used to stop changing anything a
+  fifth of the way up): on a gentle slope a bead has to be
   deeper before it breaks onto dry paper and a film deeper before it
   slides, so at a low strength an ordinary wash holds and only a puddle
   runs. With nothing pulling it, a creeping edge fills notches and holds
