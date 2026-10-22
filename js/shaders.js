@@ -346,6 +346,8 @@ ${RP.map((i) => `layout(location=${i + 1}) out vec4 oSusp${i};`).join('\n')}
 uniform sampler2D uPaper;
 uniform vec2 uPin; // film depth at which a face into dry paper opens: from, to
 uniform float uTiltGrip; // how much a slope drives the edge: 0 flat, 1 at a tilt of 0.2
+uniform vec2 uDown;      // unit vector downhill on the sheet, zero when flat
+uniform vec2 uSheetPx;   // the sheet's size in css px
 // A front advances as a front. Water leaving a stroke for dry paper used
 // to go one cell at a time along whichever row the tilt pointed down, and
 // a run was a comb of single-texel trickles. Surface tension will not
@@ -361,7 +363,36 @@ uniform float uTiltGrip; // how much a slope drives the edge: 0 flat, 1 at a til
 // the damp band in which salt works
 float band(float hn) { return smoothstep(0.0004, 0.003, hn) * (1.0 - smoothstep(0.05, 0.15, hn)); }
 
-float pin(float hUpwind, float wDest, float aroundDest, float grainDest) {
+// \`along\` is the face's direction, giver to receiver, against downhill: 1
+// straight down the slope, 0 across it, -1 up it.
+float lnoise(vec2 p) {
+  vec2 i = floor(p), u = fract(p);
+  u = u * u * (3.0 - 2.0 * u);
+  float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453);
+  float b = fract(sin(dot(i + vec2(1.0, 0.0), vec2(127.1, 311.7))) * 43758.5453);
+  float c = fract(sin(dot(i + vec2(0.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+  float d = fract(sin(dot(i + vec2(1.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// Where a bead held along a stroke's lower edge may break through and run.
+// A real bead does not let go along its whole length: it gathers into a
+// few heavier places a few millimetres apart and those drip, draining the
+// rest of the bead into themselves. On the grid that instability is a few
+// cells across, too fine to arise by itself, so the places are laid down:
+// lanes of a smooth noise stretched along the downhill direction (a drip
+// runs straight down), wandering and opening and closing along their
+// length so drips from strokes at different heights do not line up.
+// Sized on the sheet in css px, not in cells, so a drip is as wide on a
+// phone's fine grid as on a battery-saving coarse one.
+float lane(vec2 uv) {
+  vec2 c = uv * uSheetPx;
+  vec2 across = vec2(-uDown.y, uDown.x);
+  vec2 q = vec2(dot(c, across) / 30.0, dot(c, uDown) / 110.0);
+  return smoothstep(0.45, 0.6, 0.65 * lnoise(q) + 0.35 * lnoise(q * 2.3 + 17.0));
+}
+
+float pin(float hUpwind, float wDest, float aroundDest, float grainDest, float along, float laneDest) {
   if (uPin.y <= 0.0) return 1.0;
   // a straight front has three of the nine wet (0.33), the tip of a
   // two-cell thread two (0.22): the gate sits between them
@@ -378,13 +409,25 @@ float pin(float hUpwind, float wDest, float aroundDest, float grainDest) {
   // the reference tilt, 0 flat).
   float shape = clamp(0.55 + 1.6 * (aroundDest - 0.33), 0.2, 1.4);
   ease *= mix(shape, 1.0, uTiltGrip);
+  // A run's sides are pinned; only its tip is pulled. Gravity drives the
+  // contact line down the slope and does nothing to push it sideways, so
+  // a face across or up the slope needs about three times the film a
+  // downhill face does. Without this every drip that broke through spread
+  // sideways along its own flanks until it was as wide as the stroke, and
+  // a juicy stroke on a steep sheet slid down as one flat curtain.
+  // Down the slope the edge lets go only in the drip lanes; elsewhere it
+  // holds like a side.
+  float downhill = smoothstep(0.2, 0.8, along) * laneDest;
+  ease *= mix(1.0, mix(0.15, 1.15, downhill), uTiltGrip);
   // A cell the sheet drank dry in the middle of a run is not a contact
   // line: with wet film all round it, the film closes over it. Without
   // this the hole was permanent (nothing of ordinary depth could cross
   // back in) and a run was peppered with pinholes.
   // (seven or more of the nine: a pinhole, not a notch in the front — at
   // five the film crept over the sheet by chain reaction)
-  float inside = smoothstep(0.7, 0.9, aroundDest);
+  // (a one-cell slit between two drips running side by side has six: on
+  // a slope, where the sides of a run hold, it closes too)
+  float inside = smoothstep(mix(0.7, 0.6, uTiltGrip), mix(0.9, 0.7, uTiltGrip), aroundDest);
   return mix(smoothstep(uPin.x, uPin.y, hUpwind * ease) * front, 1.0, max(clamp(wDest, 0.0, 1.0), inside));
 }
 
@@ -421,15 +464,16 @@ ${RP.map((i) => `  vec4 g${i} = texture(uSusp${i}, vUV);
   float qC = texture(uPaper, vUV).w;
   float qR = texture(uPaper, vUV + oR).w, qL = texture(uPaper, vUV - oR).w;
   float qT = texture(uPaper, vUV + oT).w, qB = texture(uPaper, vUV - oT).w;
-  float kR = uR > 0.0 ? pin(f.x, fr.w, aR, qR) : pin(fr.x, f.w, aC, qC);
-  float kL = uL > 0.0 ? pin(fl.x, f.w, aC, qC) : pin(f.x, fl.w, aL, qL);
-  float kT = vT > 0.0 ? pin(f.x, ft.w, aT, qT) : pin(ft.x, f.w, aC, qC);
+  float lC = lane(vUV), lR = lane(vUV + oR), lL = lane(vUV - oR), lT = lane(vUV + oT), lB = lane(vUV - oT);
+  float kR = uR > 0.0 ? pin(f.x, fr.w, aR, qR, uDown.x, lR) : pin(fr.x, f.w, aC, qC, -uDown.x, lC);
+  float kL = uL > 0.0 ? pin(fl.x, f.w, aC, qC, uDown.x, lC) : pin(f.x, fl.w, aL, qL, -uDown.x, lL);
+  float kT = vT > 0.0 ? pin(f.x, ft.w, aT, qT, uDown.y, lT) : pin(ft.x, f.w, aC, qC, -uDown.y, lC);
   // (the destination's surroundings and grain go with the destination: kB
   // had them swapped, so water leaving a cell downward was gated by the
   // giver's surroundings while the cell below gated it by its own, the two
   // disagreed at every bead held above dry paper, and the water and pigment
   // in between were destroyed — a tilted wash lost a quarter of its water)
-  float kB = vB > 0.0 ? pin(fb.x, f.w, aC, qC) : pin(f.x, fb.w, aB, qB);
+  float kB = vB > 0.0 ? pin(fb.x, f.w, aC, qC, uDown.y, lC) : pin(f.x, fb.w, aB, qB, -uDown.y, lB);
   float fluxR = (uR > 0.0 ? f.x * uR : fr.x * uR) * kR;
   float fluxL = (uL > 0.0 ? fl.x * uL : f.x * uL) * kL;
   float fluxT = (vT > 0.0 ? f.x * vT : ft.x * vT) * kT;
@@ -493,9 +537,16 @@ ${RP.map((i) => `    n${i} -= uDt * ((vR > 0.0 ? g${i} * vR : gr${i} * vR) - (vL
     // stops it.
     float aN = k == 0 ? aL : k == 1 ? aR : k == 2 ? aB : aT;
     float qN = k == 0 ? qL : k == 1 ? qR : k == 2 ? qB : qT;
-    float cross = fn.x > f.x ? pin(fn.x, f.w, aC, qC) : pin(f.x, fn.w, aN, qN);
+    // the face's direction from this cell toward the neighbour
+    vec2 toN = k == 0 ? vec2(-1.0, 0.0) : k == 1 ? vec2(1.0, 0.0) : k == 2 ? vec2(0.0, -1.0) : vec2(0.0, 1.0);
+    float alongN = dot(toN, uDown);
+    float lN = k == 0 ? lL : k == 1 ? lR : k == 2 ? lB : lT;
+    float cross = fn.x > f.x ? pin(fn.x, f.w, aC, qC, -alongN, lC) : pin(f.x, fn.w, aN, qN, alongN, lN);
     float open = clamp(max(f.w, fn.w), 0.0, 1.0) * cross;
-    float c = min(0.05, 0.25 * (uSmooth + uGrav * mobf)) * open;
+    // On a slope the bead along a lower edge has to reach the drip lanes
+    // before it fills deep enough to break through between them, so the
+    // film levels faster sideways; flat, the old limit.
+    float c = min(mix(0.05, 0.12, uTiltGrip), 0.25 * (uSmooth + uGrav * mobf)) * open;
     float ex = c * (fn.x - f.x);
     float dif = uPigDiff * uDt * 0.25 * min(f.w, fn.w) * min(mobC, smoothstep(0.0005, 0.01, fn.x));
     float cn = ex > 0.0 ? ex / max(fn.x, 1e-5) : ex / h0;
@@ -882,7 +933,11 @@ ${RP.map((i) => `  {
     Rtot = mix(Rtot, ov, 0.4 * amt);
   }
 
-  frag = vec4(pow(clamp(Rtot, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
+  // alpha carries how much paint is on this cell, for the blit: it traces
+  // the outline of the paint from this at screen resolution, rather than
+  // magnifying the grid's cells into stair-steps
+  float cover = smoothstep(0.0, 0.06, total + metalAmt);
+  frag = vec4(pow(clamp(Rtot, 0.0, 1.0), vec3(1.0 / 2.2)), cover);
 }`;
 
 // ----------------------------------------------------------------- salt ----
@@ -913,7 +968,44 @@ void main() {
     frag = vec4(vec3(0.17, 0.16, 0.15) * shade, 1.0);
     return;
   }
-  frag = texture(uFrame, uv);
+  // The sheet is shaded one grid cell per css pixel, and a phone shows a
+  // cell as 3x3 device pixels, so magnifying it, however smoothly, turns
+  // every hard edge that runs at a slant into a staircase. The outline is
+  // rebuilt instead: the paint coverage in alpha is read through a cubic
+  // B-spline over the 4x4 cells around this pixel (four filtered taps),
+  // which rounds the staircase into a curve, and the curve is cut at half
+  // coverage with a one-pixel antialiased edge. The colour on the painted
+  // side comes from the nearby painted cells, paper from the others.
+  // Inside a wash, or across a soft blend, the two sides are the same
+  // colour and this changes nothing.
+  vec2 size = vec2(textureSize(uFrame, 0));
+  vec2 st = uv * size - 0.5;
+  vec2 i = floor(st), fr = st - i;
+  vec2 fr2 = fr * fr, fr3 = fr2 * fr;
+  vec2 w0 = (1.0 - 3.0 * fr + 3.0 * fr2 - fr3) / 6.0;
+  vec2 w1 = (4.0 - 6.0 * fr2 + 3.0 * fr3) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * fr + 3.0 * fr2 - 3.0 * fr3) / 6.0;
+  vec2 w3 = fr3 / 6.0;
+  vec2 g0 = w0 + w1, g1 = w2 + w3;
+  vec2 h0 = (i - 0.5 + w1 / g0) / size;
+  vec2 h1 = (i + 1.5 + w3 / g1) / size;
+  float a = g0.y * (g0.x * texture(uFrame, vec2(h0.x, h0.y)).a + g1.x * texture(uFrame, vec2(h1.x, h0.y)).a)
+          + g1.y * (g0.x * texture(uFrame, vec2(h0.x, h1.y)).a + g1.x * texture(uFrame, vec2(h1.x, h1.y)).a);
+
+  ivec2 b = ivec2(i), hi = ivec2(size) - 1;
+  vec4 c00 = texelFetch(uFrame, clamp(b, ivec2(0), hi), 0);
+  vec4 c10 = texelFetch(uFrame, clamp(b + ivec2(1, 0), ivec2(0), hi), 0);
+  vec4 c01 = texelFetch(uFrame, clamp(b + ivec2(0, 1), ivec2(0), hi), 0);
+  vec4 c11 = texelFetch(uFrame, clamp(b + ivec2(1, 1), ivec2(0), hi), 0);
+  vec4 wb = vec4((1.0 - fr.x) * (1.0 - fr.y), fr.x * (1.0 - fr.y), (1.0 - fr.x) * fr.y, fr.x * fr.y);
+  vec4 inside = step(0.5, vec4(c00.a, c10.a, c01.a, c11.a));
+  vec4 wi = wb * inside, wo = wb - wi;
+  float si = dot(wi, vec4(1.0)), so = dot(wo, vec4(1.0));
+  vec3 lin = wb.x * c00.rgb + wb.y * c10.rgb + wb.z * c01.rgb + wb.w * c11.rgb;
+  vec3 cIn = si > 1e-4 ? (wi.x * c00.rgb + wi.y * c10.rgb + wi.z * c01.rgb + wi.w * c11.rgb) / si : lin;
+  vec3 cOut = so > 1e-4 ? (wo.x * c00.rgb + wo.y * c10.rgb + wo.z * c01.rgb + wo.w * c11.rgb) / so : lin;
+  float edge = clamp((a - 0.5) / max(fwidth(a), 1e-4) + 0.5, 0.0, 1.0);
+  frag = vec4(mix(cOut, cIn, edge), 1.0);
 }`;
 
 SHADERS.salt = `#version 300 es

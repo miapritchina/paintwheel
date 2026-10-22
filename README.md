@@ -157,7 +157,23 @@ reached:
   simulation never needed the filter — every pass reads at cell centres —
   only the picture did, so the picture is now shaded once per grid cell
   into an ordinary 8-bit texture and magnified from there. Settings → About
-  says which engine a device got.
+  says which engine a device got. Magnified plainly, a cell is 3x3 device
+  pixels on a phone and every hard edge at a slant came out as a
+  staircase; the outline of the paint is now traced at screen resolution
+  instead (a B-spline of the paint coverage, cut at half and antialiased),
+  so a slanted edge is a line, while a soft blend, which has the same
+  colour on both sides of the cut, is untouched.
+- **A steep sheet slid a stroke down as a curtain.** Tilted hard, every wet
+  cell along a stroke's lower edge ran at the same speed limit and the
+  edge let go everywhere at once, so the stroke slumped into a sheet three
+  times its height with a flat hem. A real bead gathers into a few places
+  and drips from those, and its runs' sides stay put while their tips are
+  pulled. Now: across or up the slope the edge holds firmly; down it, it
+  lets go only in drip lanes, a few millimetres wide and a couple of
+  centimetres apart, that wander and open and close along the slope; the
+  film levels faster sideways on a slope so the bead drains into them; and
+  a one-cell slit between two runs side by side closes. The same strokes
+  keep their shape and drip, and the drips carry the colour down.
 - **Water was being destroyed under every wash held above dry paper.** The
   contact-line gate on a cell's bottom face had its destination's
   surroundings and grain swapped with its own, so where water left a cell
@@ -618,8 +634,9 @@ reproduces a run and a log can say where the water went.
   deeper before it breaks onto dry paper and a film deeper before it
   slides, so at a low strength an ordinary wash holds and only a puddle
   runs. With nothing pulling it, a creeping edge fills notches and holds
-  where it is flat, as surface tension does. With run-off off, tilt does
-  nothing.
+  where it is flat, as surface tension does. On a steep slope a stroke's
+  bead drips from a few places rather than sliding down as one sheet. With
+  run-off off, tilt does nothing.
 - **Dry**: tap to dry the whole sheet, film and damp paper both (a soaked
   wash in about three seconds); the button stays lit until the sheet is
   dry and switches itself off, and a second tap stops it. It used to dry

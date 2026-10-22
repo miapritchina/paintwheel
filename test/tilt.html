@@ -8,7 +8,8 @@
   pictures at 1, 4 and 10 seconds and dried, plus numbers for each mark —
   how far it ran, how many separate threads cross it halfway down, and
   whether the pigment on the sheet stayed the pigment put down. Render it
-  with tools/scenes.js --page tilt [--query a=0,10,20&s=1&dir=0].
+  with tools/scenes.js --page tilt [--query a=0,10,20&s=1&dir=0&res=440];
+  res is the grid size (1020 here is about the density of a phone).
 
   Tilt is set as the app sets it (js/main.js): a 5 degree dead band, then
   0.25 * strength * sin(angle past the band). dir is the downhill
@@ -40,7 +41,7 @@ const DIR = Number(Q.get('dir') || 0);
 const cv = document.getElementById('sheet');
 cv.style.width = W + 'px';
 cv.style.height = H + 'px';
-const sim = new WatercolorSim(cv, { paper: 'rough', maxSim: 440 });
+const sim = new WatercolorSim(cv, { paper: 'rough', maxSim: Number(Q.get('res') || 440) });
 window.sim = sim;
 
 const PAINTS = {};
